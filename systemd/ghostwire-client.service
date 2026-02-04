@@ -1,0 +1,13 @@
+[Unit]
+Description=GhostWire Client
+After=network.target
+
+[Service]
+Type=simple
+User=ghostwire
+ExecStart=/usr/local/bin/ghostwire-client -c /etc/ghostwire/client.toml
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

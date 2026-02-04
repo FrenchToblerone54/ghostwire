@@ -1,0 +1,16 @@
+[server]
+listen_host="0.0.0.0"
+listen_port=8443
+websocket_path="/ws"
+
+[auth]
+token="REPLACE_WITH_GENERATED_TOKEN"
+
+[security]
+max_connections_per_client=100
+connection_timeout=300
+allowed_destinations=["0.0.0.0/0"]
+
+[logging]
+level="info"
+file="/var/log/ghostwire-server.log"
