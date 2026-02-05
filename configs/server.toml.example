@@ -6,6 +6,12 @@ websocket_path="/ws"
 [auth]
 token="REPLACE_WITH_GENERATED_TOKEN"
 
+[tunnels]
+ports=[
+"8080=80",
+"8443=443",
+]
+
 [security]
 max_connections_per_client=100
 connection_timeout=300

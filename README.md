@@ -35,13 +35,17 @@ sudo ./install-client.sh
 
 ## Architecture
 
+**Reverse Tunnel**: Client in censored country connects OUT to server, which then listens on public ports. Traffic flows through the tunnel to the client, which makes outbound connections to internet destinations.
+
 ```
-[Application] --> [Local Port] --> [Client] <--WebSocket/HTTP2/TLS--> [Server] --> [Remote Port/IP]
+[User in Uncensored] --> [Server Port] --> [Server] <--WebSocket/HTTP2/TLS--> [Client in Censored] --> [Internet]
 ```
+
+The client in the censored country acts as an **exit node** for traffic initiated on the server side.
 
 ## Port Mapping Syntax
 
-The client supports flexible port mapping configurations:
+The server supports flexible port mapping configurations (server listens, client connects):
 
 ```toml
 ports=[
@@ -69,6 +73,9 @@ websocket_path="/ws"
 [auth]
 token="V1StGXR8_Z5jdHi6B-my"
 
+[tunnels]
+ports=["8080=80", "8443=443"]
+
 [security]
 max_connections_per_client=100
 connection_timeout=300
@@ -90,9 +97,6 @@ token="V1StGXR8_Z5jdHi6B-my"
 initial_delay=1
 max_delay=60
 multiplier=2
-
-[tunnels]
-ports=["8080=80", "8443=443"]
 
 [cloudflare]
 enabled=false

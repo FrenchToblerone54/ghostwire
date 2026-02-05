@@ -41,8 +41,6 @@ mkdir -p /etc/ghostwire
 if [ ! -f /etc/ghostwire/client.toml ]; then
     read -p "Enter server URL (e.g., wss://tunnel.example.com/ws): " SERVER_URL
     read -p "Enter authentication token: " TOKEN
-    read -p "Enter local port to forward (e.g., 8080): " LOCAL_PORT
-    read -p "Enter remote port to connect to (e.g., 80): " REMOTE_PORT
 
     cat > /etc/ghostwire/client.toml <<EOF
 [server]
@@ -53,11 +51,6 @@ token="${TOKEN}"
 initial_delay=1
 max_delay=60
 multiplier=2
-
-[tunnels]
-ports=[
-"${LOCAL_PORT}=${REMOTE_PORT}",
-]
 
 [cloudflare]
 enabled=false

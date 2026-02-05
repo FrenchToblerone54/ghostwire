@@ -21,7 +21,6 @@ class GhostWireClient:
         self.key=None
         self.running=False
         self.reconnect_delay=config.initial_delay
-        self.listeners=[]
 
     async def connect(self):
         try:
@@ -59,25 +58,18 @@ class GhostWireClient:
                 continue
         return best_ip
 
-    async def start_listeners(self):
-        for local_ip,local_port,remote_ip,remote_port in self.config.port_mappings:
-            server=await asyncio.start_server(lambda r,w,rip=remote_ip,rport=remote_port:self.handle_local_connection(r,w,rip,rport),local_ip,local_port)
-            self.listeners.append(server)
-            logger.info(f"Listening on {local_ip}:{local_port} -> {remote_ip}:{remote_port}")
-
-    async def handle_local_connection(self,reader,writer,remote_ip,remote_port):
-        conn_id=self.tunnel_manager.generate_conn_id()
-        self.tunnel_manager.add_connection(conn_id,(reader,writer))
-        logger.info(f"New local connection {conn_id} -> {remote_ip}:{remote_port}")
+    async def handle_connect(self,conn_id,remote_ip,remote_port):
         try:
-            connect_msg=pack_connect(conn_id,remote_ip,remote_port,self.key)
-            await self.websocket.send(connect_msg)
-            asyncio.create_task(self.forward_local_to_websocket(conn_id,reader))
+            logger.info(f"CONNECT request: {conn_id} -> {remote_ip}:{remote_port}")
+            reader,writer=await asyncio.wait_for(asyncio.open_connection(remote_ip,remote_port),timeout=10)
+            self.tunnel_manager.add_connection(conn_id,(reader,writer))
+            asyncio.create_task(self.forward_remote_to_websocket(conn_id,reader))
         except Exception as e:
-            logger.error(f"Error sending CONNECT: {e}")
-            self.tunnel_manager.remove_connection(conn_id)
+            logger.error(f"Failed to connect to {remote_ip}:{remote_port}: {e}")
+            error_msg=pack_error(conn_id,str(e),self.key)
+            await self.websocket.send(error_msg)
 
-    async def forward_local_to_websocket(self,conn_id,reader):
+    async def forward_remote_to_websocket(self,conn_id,reader):
         try:
             while True:
                 data=await reader.read(65536)
@@ -105,7 +97,10 @@ class GhostWireClient:
                         buffer=buffer[consumed:]
                     except ValueError:
                         break
-                    if msg_type==MSG_DATA:
+                    if msg_type==MSG_CONNECT:
+                        remote_ip,remote_port=unpack_connect(payload)
+                        await self.handle_connect(conn_id,remote_ip,remote_port)
+                    elif msg_type==MSG_DATA:
                         await self.handle_data(conn_id,payload)
                     elif msg_type==MSG_CLOSE:
                         self.tunnel_manager.remove_connection(conn_id)
@@ -127,7 +122,7 @@ class GhostWireClient:
                 writer.write(payload)
                 await writer.drain()
             except Exception as e:
-                logger.error(f"Error writing to local connection {conn_id}: {e}")
+                logger.error(f"Error writing to remote connection {conn_id}: {e}")
                 self.tunnel_manager.remove_connection(conn_id)
 
     async def ping_loop(self):
@@ -146,8 +141,6 @@ class GhostWireClient:
         while self.running:
             if await self.connect():
                 try:
-                    if not self.listeners:
-                        await self.start_listeners()
                     ping_task=asyncio.create_task(self.ping_loop())
                     await self.receive_messages()
                     ping_task.cancel()
@@ -164,8 +157,6 @@ class GhostWireClient:
 
     def stop(self):
         self.running=False
-        for server in self.listeners:
-            server.close()
 
 def signal_handler(client):
     logger.info("Received shutdown signal")

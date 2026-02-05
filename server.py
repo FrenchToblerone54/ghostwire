@@ -17,97 +17,109 @@ logger=logging.getLogger(__name__)
 class GhostWireServer:
     def __init__(self,config):
         self.config=config
-        self.clients={}
         self.running=False
+        self.websocket=None
+        self.key=None
+        self.tunnel_manager=TunnelManager()
+        self.listeners=[]
 
     async def handle_client(self,websocket,path):
         client_id=f"{websocket.remote_address[0]}:{websocket.remote_address[1]}"
         logger.info(f"New connection from {client_id}")
-        tunnel_manager=TunnelManager()
-        key=None
         authenticated=False
         try:
             buffer=b""
+            auth_msg=await asyncio.wait_for(websocket.recv(),timeout=10)
+            buffer+=auth_msg
+            if len(buffer)>=9:
+                msg_type,conn_id,token,consumed=unpack_message(buffer,None)
+                buffer=buffer[consumed:]
+                if msg_type!=MSG_AUTH:
+                    logger.warning(f"Expected AUTH message from {client_id}")
+                    return
+                if not validate_token(token,self.config.token):
+                    logger.warning(f"Invalid token from {client_id}")
+                    return
+                authenticated=True
+                self.key=derive_key(token,f"ws://{self.config.listen_host}:{self.config.listen_port}{self.config.websocket_path}")
+                logger.info(f"Client {client_id} authenticated")
+                self.websocket=websocket
+                if not self.listeners:
+                    await self.start_listeners()
             async for message in websocket:
                 buffer+=message
                 while len(buffer)>=9:
-                    if not authenticated:
-                        msg_type,conn_id,token,consumed=unpack_message(buffer,None)
-                        buffer=buffer[consumed:]
-                        if msg_type!=MSG_AUTH:
-                            logger.warning(f"Expected AUTH message from {client_id}")
-                            return
-                        if not validate_token(token,self.config.token):
-                            logger.warning(f"Invalid token from {client_id}")
-                            return
-                        authenticated=True
-                        key=derive_key(token,f"ws://{self.config.listen_host}:{self.config.listen_port}{self.config.websocket_path}")
-                        logger.info(f"Client {client_id} authenticated")
-                        continue
                     try:
-                        msg_type,conn_id,payload,consumed=unpack_message(buffer,key)
+                        msg_type,conn_id,payload,consumed=unpack_message(buffer,self.key)
                         buffer=buffer[consumed:]
                     except ValueError:
                         break
-                    if msg_type==MSG_CONNECT:
-                        await self.handle_connect(websocket,conn_id,payload,tunnel_manager,key)
-                    elif msg_type==MSG_DATA:
-                        await self.handle_data(conn_id,payload,tunnel_manager)
+                    if msg_type==MSG_DATA:
+                        await self.handle_data(conn_id,payload)
                     elif msg_type==MSG_CLOSE:
-                        await self.handle_close(conn_id,tunnel_manager)
-                    elif msg_type==MSG_PING:
-                        timestamp=struct.unpack("!Q",payload)[0]
-                        await websocket.send(pack_pong(timestamp,key))
+                        await self.handle_close(conn_id)
+                    elif msg_type==MSG_ERROR:
+                        logger.error(f"Client error for {conn_id}: {payload.decode()}")
+                        self.tunnel_manager.remove_connection(conn_id)
+                    elif msg_type==MSG_PONG:
+                        pass
         except websockets.exceptions.ConnectionClosed:
             logger.info(f"Client {client_id} disconnected")
         except Exception as e:
             logger.error(f"Error handling client {client_id}: {e}")
         finally:
-            tunnel_manager.close_all()
+            self.websocket=None
+            self.tunnel_manager.close_all()
 
-    async def handle_connect(self,websocket,conn_id,payload,tunnel_manager,key):
+    async def start_listeners(self):
+        for local_ip,local_port,remote_ip,remote_port in self.config.port_mappings:
+            server=await asyncio.start_server(lambda r,w,rip=remote_ip,rport=remote_port:self.handle_local_connection(r,w,rip,rport),local_ip,local_port)
+            self.listeners.append(server)
+            logger.info(f"Listening on {local_ip}:{local_port} -> {remote_ip}:{remote_port}")
+
+    async def handle_local_connection(self,reader,writer,remote_ip,remote_port):
+        conn_id=self.tunnel_manager.generate_conn_id()
+        self.tunnel_manager.add_connection(conn_id,(reader,writer))
+        logger.info(f"New local connection {conn_id} -> {remote_ip}:{remote_port}")
         try:
-            remote_ip,remote_port=unpack_connect(payload)
-            logger.info(f"CONNECT request: {conn_id} -> {remote_ip}:{remote_port}")
-            reader,writer=await asyncio.wait_for(asyncio.open_connection(remote_ip,remote_port),timeout=10)
-            tunnel_manager.add_connection(conn_id,(reader,writer))
-            asyncio.create_task(self.forward_remote_to_websocket(conn_id,reader,websocket,tunnel_manager,key))
+            connect_msg=pack_connect(conn_id,remote_ip,remote_port,self.key)
+            await self.websocket.send(connect_msg)
+            asyncio.create_task(self.forward_local_to_websocket(conn_id,reader))
         except Exception as e:
-            logger.error(f"Failed to connect to {remote_ip}:{remote_port}: {e}")
-            error_msg=pack_error(conn_id,str(e),key)
-            await websocket.send(error_msg)
+            logger.error(f"Error sending CONNECT: {e}")
+            self.tunnel_manager.remove_connection(conn_id)
 
-    async def handle_data(self,conn_id,payload,tunnel_manager):
-        connection=tunnel_manager.get_connection(conn_id)
+    async def forward_local_to_websocket(self,conn_id,reader):
+        try:
+            while True:
+                data=await reader.read(65536)
+                if not data:
+                    break
+                message=pack_data(conn_id,data,self.key)
+                await self.websocket.send(message)
+        except Exception as e:
+            logger.debug(f"Forward error for {conn_id}: {e}")
+        finally:
+            try:
+                await self.websocket.send(pack_close(conn_id,0,self.key))
+            except:
+                pass
+            self.tunnel_manager.remove_connection(conn_id)
+
+    async def handle_data(self,conn_id,payload):
+        connection=self.tunnel_manager.get_connection(conn_id)
         if connection:
             reader,writer=connection
             try:
                 writer.write(payload)
                 await writer.drain()
             except Exception as e:
-                logger.error(f"Error writing to connection {conn_id}: {e}")
-                tunnel_manager.remove_connection(conn_id)
+                logger.error(f"Error writing to local connection {conn_id}: {e}")
+                self.tunnel_manager.remove_connection(conn_id)
 
-    async def handle_close(self,conn_id,tunnel_manager):
-        logger.info(f"CLOSE request: {conn_id}")
-        tunnel_manager.remove_connection(conn_id)
-
-    async def forward_remote_to_websocket(self,conn_id,reader,websocket,tunnel_manager,key):
-        try:
-            while True:
-                data=await reader.read(65536)
-                if not data:
-                    break
-                message=pack_data(conn_id,data,key)
-                await websocket.send(message)
-        except Exception as e:
-            logger.debug(f"Forward error for {conn_id}: {e}")
-        finally:
-            tunnel_manager.remove_connection(conn_id)
-            try:
-                await websocket.send(pack_close(conn_id,0,key))
-            except:
-                pass
+    async def handle_close(self,conn_id):
+        logger.info(f"CLOSE from client: {conn_id}")
+        self.tunnel_manager.remove_connection(conn_id)
 
     async def start(self):
         self.running=True

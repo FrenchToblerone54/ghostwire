@@ -42,6 +42,9 @@ if [ ! -f /etc/ghostwire/server.toml ]; then
     echo "Generating authentication token..."
     TOKEN=$(/usr/local/bin/ghostwire-server --generate-token)
 
+    read -p "Enter local port to listen on (e.g., 8080): " LOCAL_PORT
+    read -p "Enter remote destination to forward to (e.g., 80 or 1.1.1.1:443): " REMOTE_DEST
+
     cat > /etc/ghostwire/server.toml <<EOF
 [server]
 listen_host="0.0.0.0"
@@ -50,6 +53,9 @@ websocket_path="/ws"
 
 [auth]
 token="${TOKEN}"
+
+[tunnels]
+ports=["${LOCAL_PORT}=${REMOTE_DEST}"]
 
 [security]
 max_connections_per_client=100

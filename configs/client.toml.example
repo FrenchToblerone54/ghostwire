@@ -7,12 +7,6 @@ initial_delay=1
 max_delay=60
 multiplier=2
 
-[tunnels]
-ports=[
-"8080=80",
-"8443=443",
-]
-
 [cloudflare]
 enabled=false
 ips=[]

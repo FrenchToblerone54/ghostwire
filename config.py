@@ -67,6 +67,7 @@ class ServerConfig:
         self.listen_port=config["server"].get("listen_port",8443)
         self.websocket_path=config["server"].get("websocket_path","/ws")
         self.token=config["auth"]["token"]
+        self.port_mappings=parse_port_mappings(config["tunnels"]["ports"])
         self.max_connections_per_client=config["security"].get("max_connections_per_client",100)
         self.connection_timeout=config["security"].get("connection_timeout",300)
         self.allowed_destinations=config["security"].get("allowed_destinations",["0.0.0.0/0"])
@@ -81,7 +82,6 @@ class ClientConfig:
         self.initial_delay=config["reconnect"].get("initial_delay",1)
         self.max_delay=config["reconnect"].get("max_delay",60)
         self.multiplier=config["reconnect"].get("multiplier",2)
-        self.port_mappings=parse_port_mappings(config["tunnels"]["ports"])
         self.cloudflare_enabled=config["cloudflare"].get("enabled",False)
         self.cloudflare_ips=config["cloudflare"].get("ips",[])
         self.cloudflare_host=config["cloudflare"].get("host","")
