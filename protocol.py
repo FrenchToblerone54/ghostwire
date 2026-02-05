@@ -31,8 +31,8 @@ def rsa_encrypt(public_key,plaintext):
 def rsa_decrypt(private_key,ciphertext):
     return private_key.decrypt(ciphertext,padding.OAEP(mgf=padding.MGF1(algorithm=hashes.SHA256()),algorithm=hashes.SHA256(),label=None))
 
-def derive_key(token,server_url):
-    salt=hashlib.sha256(server_url.encode()).digest()[:16]
+def derive_key(token):
+    salt=b"ghostwire.tunnel.aes256gcm.v1.2026"
     kdf=PBKDF2HMAC(algorithm=hashes.SHA256(),length=32,salt=salt,iterations=100000)
     return kdf.derive(token.encode())
 

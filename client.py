@@ -31,7 +31,7 @@ class GhostWireClient:
                 if best_ip:
                     server_url=self.config.server_url.replace(self.config.cloudflare_host,best_ip)
                     logger.info(f"Using CloudFlare IP: {best_ip}")
-            self.websocket=await websockets.connect(server_url,max_size=None)
+            self.websocket=await websockets.connect(server_url,max_size=None,ping_interval=20,ping_timeout=20)
             pubkey_msg=await asyncio.wait_for(self.websocket.recv(),timeout=10)
             if len(pubkey_msg)<9:
                 raise ValueError("Invalid public key message")
@@ -41,7 +41,7 @@ class GhostWireClient:
             server_public_key=deserialize_public_key(pubkey_bytes)
             auth_msg=pack_auth_message(self.config.token,server_public_key)
             await self.websocket.send(auth_msg)
-            self.key=derive_key(self.config.token,self.config.server_url)
+            self.key=derive_key(self.config.token)
             logger.info("Connected and authenticated to server")
             self.reconnect_delay=self.config.initial_delay
             return True
@@ -56,7 +56,7 @@ class GhostWireClient:
             try:
                 test_url=self.config.server_url.replace(self.config.cloudflare_host,ip)
                 start=time.time()
-                ws=await asyncio.wait_for(websockets.connect(test_url,max_size=None),timeout=5)
+                ws=await asyncio.wait_for(websockets.connect(test_url,max_size=None,ping_interval=20,ping_timeout=20),timeout=5)
                 latency=time.time()-start
                 await ws.close()
                 if latency<best_latency:

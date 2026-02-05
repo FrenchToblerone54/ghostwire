@@ -52,7 +52,7 @@ class GhostWireServer:
                     logger.warning(f"Invalid token from {client_id}")
                     return
                 authenticated=True
-                self.key=derive_key(token,f"ws://{self.config.listen_host}:{self.config.listen_port}{self.config.websocket_path}")
+                self.key=derive_key(token)
                 logger.info(f"Client {client_id} authenticated")
                 self.websocket=websocket
                 if not self.listeners:
@@ -146,7 +146,7 @@ class GhostWireServer:
     async def start(self):
         self.running=True
         logger.info(f"Starting GhostWire server on {self.config.listen_host}:{self.config.listen_port}")
-        async with websockets.serve(self.handle_client,self.config.listen_host,self.config.listen_port,max_size=None):
+        async with websockets.serve(self.handle_client,self.config.listen_host,self.config.listen_port,max_size=None,ping_interval=20,ping_timeout=20):
             await asyncio.Future()
 
     def stop(self):
