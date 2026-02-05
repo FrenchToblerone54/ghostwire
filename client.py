@@ -116,7 +116,7 @@ class GhostWireClient:
         except websockets.exceptions.ConnectionClosed:
             logger.warning("Connection closed by server")
         except Exception as e:
-            logger.error(f"Receive error: {e}")
+            logger.error(f"Receive error: {e}",exc_info=True)
 
     async def handle_data(self,conn_id,payload):
         connection=self.tunnel_manager.get_connection(conn_id)
