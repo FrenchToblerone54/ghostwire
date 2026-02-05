@@ -69,8 +69,8 @@ def pack_auth_message(token,public_key=None):
         return header+token.encode()
 
 def pack_message(msg_type,conn_id,payload,key):
-    header=pack_header(msg_type,conn_id,0)
-    encrypted=encrypt_payload(key,payload,header)
+    aad=pack_header(msg_type,conn_id,0)
+    encrypted=encrypt_payload(key,payload,aad)
     header=pack_header(msg_type,conn_id,len(encrypted))
     return header+encrypted
 
@@ -86,7 +86,8 @@ def unpack_message(data,key):
         return msg_type,conn_id,payload,9+payload_length
     if msg_type==MSG_AUTH:
         return msg_type,conn_id,payload,9+payload_length
-    decrypted=decrypt_payload(key,payload,header)
+    aad=pack_header(msg_type,conn_id,0)
+    decrypted=decrypt_payload(key,payload,aad)
     return msg_type,conn_id,decrypted,9+payload_length
 
 def pack_connect(conn_id,remote_ip,remote_port,key):
