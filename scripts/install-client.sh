@@ -92,7 +92,12 @@ systemctl daemon-reload
 
 echo "Enabling and starting GhostWire client..."
 systemctl enable ghostwire-client
-systemctl start ghostwire-client
+if systemctl is-active --quiet ghostwire-client; then
+    echo "Restarting existing service..."
+    systemctl restart ghostwire-client
+else
+    systemctl start ghostwire-client
+fi
 
 echo ""
 echo "Installation complete!"

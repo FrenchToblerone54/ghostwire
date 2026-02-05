@@ -158,7 +158,12 @@ fi
 
 echo "Enabling and starting GhostWire server..."
 systemctl enable ghostwire-server
-systemctl start ghostwire-server
+if systemctl is-active --quiet ghostwire-server; then
+    echo "Restarting existing service..."
+    systemctl restart ghostwire-server
+else
+    systemctl start ghostwire-server
+fi
 
 echo ""
 echo "Installation complete!"
