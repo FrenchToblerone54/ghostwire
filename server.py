@@ -23,6 +23,7 @@ class GhostWireServer:
         self.key=None
         self.tunnel_manager=TunnelManager()
         self.listeners=[]
+        self.send_lock=asyncio.Lock()
 
     async def handle_client(self,websocket):
         client_id=f"{websocket.remote_address[0]}:{websocket.remote_address[1]}"
@@ -64,7 +65,8 @@ class GhostWireServer:
                         self.tunnel_manager.remove_connection(conn_id)
                     elif msg_type==MSG_PING:
                         timestamp=struct.unpack("!Q",payload)[0]
-                        await self.websocket.send(pack_pong(timestamp,self.key))
+                        async with self.send_lock:
+                            await self.websocket.send(pack_pong(timestamp,self.key))
                     elif msg_type==MSG_PONG:
                         pass
         except websockets.exceptions.ConnectionClosed:
@@ -91,7 +93,8 @@ class GhostWireServer:
                 self.tunnel_manager.remove_connection(conn_id)
                 return
             connect_msg=pack_connect(conn_id,remote_ip,remote_port,self.key)
-            await self.websocket.send(connect_msg)
+            async with self.send_lock:
+                await self.websocket.send(connect_msg)
             asyncio.create_task(self.forward_local_to_websocket(conn_id,reader))
         except Exception as e:
             logger.error(f"Error sending CONNECT: {e}")
@@ -104,12 +107,14 @@ class GhostWireServer:
                 if not data:
                     break
                 message=pack_data(conn_id,data,self.key)
-                await self.websocket.send(message)
+                async with self.send_lock:
+                    await self.websocket.send(message)
         except Exception as e:
             logger.debug(f"Forward error for {conn_id}: {e}")
         finally:
             try:
-                await self.websocket.send(pack_close(conn_id,0,self.key))
+                async with self.send_lock:
+                    await self.websocket.send(pack_close(conn_id,0,self.key))
             except:
                 pass
             self.tunnel_manager.remove_connection(conn_id)

@@ -21,6 +21,7 @@ class GhostWireClient:
         self.key=None
         self.running=False
         self.reconnect_delay=config.initial_delay
+        self.send_lock=asyncio.Lock()
 
     async def connect(self):
         try:
@@ -67,7 +68,8 @@ class GhostWireClient:
         except Exception as e:
             logger.error(f"Failed to connect to {remote_ip}:{remote_port}: {e}")
             error_msg=pack_error(conn_id,str(e),self.key)
-            await self.websocket.send(error_msg)
+            async with self.send_lock:
+                await self.websocket.send(error_msg)
 
     async def forward_remote_to_websocket(self,conn_id,reader):
         try:
@@ -76,12 +78,14 @@ class GhostWireClient:
                 if not data:
                     break
                 message=pack_data(conn_id,data,self.key)
-                await self.websocket.send(message)
+                async with self.send_lock:
+                    await self.websocket.send(message)
         except Exception as e:
             logger.debug(f"Forward error for {conn_id}: {e}")
         finally:
             try:
-                await self.websocket.send(pack_close(conn_id,0,self.key))
+                async with self.send_lock:
+                    await self.websocket.send(pack_close(conn_id,0,self.key))
             except:
                 pass
             self.tunnel_manager.remove_connection(conn_id)
@@ -131,7 +135,8 @@ class GhostWireClient:
                 await asyncio.sleep(30)
                 if self.websocket:
                     timestamp=int(time.time()*1000)
-                    await self.websocket.send(pack_ping(timestamp,self.key))
+                    async with self.send_lock:
+                        await self.websocket.send(pack_ping(timestamp,self.key))
             except Exception as e:
                 logger.debug(f"Ping error: {e}")
                 break
