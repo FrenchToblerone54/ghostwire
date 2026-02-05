@@ -13,10 +13,10 @@ ips=[]
 host=""
 check_interval=300
 
-[security]
-max_connections=100
-connection_timeout=300
-allowed_destinations=["0.0.0.0/0"]
+# [security]
+# max_connections=0  # 0 = unlimited, or set a limit
+# connection_timeout=300
+# allowed_destinations=["0.0.0.0/0"]  # Restrict which IPs client can connect to
 
 [logging]
 level="info"
