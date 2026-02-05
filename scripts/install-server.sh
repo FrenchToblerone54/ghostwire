@@ -42,13 +42,22 @@ if [ ! -f /etc/ghostwire/server.toml ]; then
     echo "Generating authentication token..."
     TOKEN=$(/usr/local/bin/ghostwire-server --generate-token)
 
-    read -p "Enter local port to listen on (e.g., 8080): " LOCAL_PORT
-    read -p "Enter remote destination to forward to (e.g., 80 or 1.1.1.1:443): " REMOTE_DEST
+    echo ""
+    echo "WebSocket Configuration (client connects to this):"
+    read -p "  WebSocket listen host [0.0.0.0]: " WS_HOST
+    WS_HOST=${WS_HOST:-0.0.0.0}
+    read -p "  WebSocket listen port [8443]: " WS_PORT
+    WS_PORT=${WS_PORT:-8443}
+
+    echo ""
+    echo "Port Mapping Configuration (users in Iran connect to this):"
+    read -p "  Local port to listen on (e.g., 8080): " LOCAL_PORT
+    read -p "  Remote destination to forward to (e.g., 80 or 1.1.1.1:443): " REMOTE_DEST
 
     cat > /etc/ghostwire/server.toml <<EOF
 [server]
-listen_host="0.0.0.0"
-listen_port=8443
+listen_host="${WS_HOST}"
+listen_port=${WS_PORT}
 websocket_path="/ws"
 
 [auth]
@@ -62,11 +71,20 @@ level="info"
 file="/var/log/ghostwire-server.log"
 EOF
 
+    echo ""
     echo "Configuration created at /etc/ghostwire/server.toml"
     echo ""
     echo "IMPORTANT: Save this authentication token:"
     echo "  ${TOKEN}"
     echo ""
+    echo "Server Configuration:"
+    echo "  WebSocket listens on: ${WS_HOST}:${WS_PORT}/ws"
+    echo "  Users connect to: localhost:${LOCAL_PORT} (forwards to ${REMOTE_DEST})"
+    echo ""
+else
+    echo "Configuration already exists at /etc/ghostwire/server.toml"
+    WS_PORT=$(grep "listen_port" /etc/ghostwire/server.toml | cut -d'=' -f2 | tr -d ' ')
+    WS_PORT=${WS_PORT:-8443}
 fi
 
 echo "Creating system user..."
@@ -125,7 +143,7 @@ server {
     ssl_ciphers HIGH:!aNULL:!MD5;
 
     location /ws {
-        proxy_pass http://127.0.0.1:8443;
+        proxy_pass http://127.0.0.1:${WS_PORT};
         proxy_http_version 1.1;
         proxy_set_header Upgrade \$http_upgrade;
         proxy_set_header Connection "upgrade";
@@ -168,7 +186,6 @@ fi
 echo ""
 echo "Installation complete!"
 echo ""
-echo "Server is running on port 8443"
 echo "Configuration: /etc/ghostwire/server.toml"
 echo ""
 echo "Useful commands:"
