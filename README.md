@@ -4,16 +4,17 @@ GhostWire is a WebSocket-based reverse tunnel system designed to help users in c
 
 ## Features
 
-- Single persistent WebSocket connection for bidirectional communication
-- TCP port forwarding with flexible mapping syntax
-- HTTP/2 with TLS encryption
-- Application-layer AES-256-GCM encryption
-- nginx reverse proxy support
-- CloudFlare compatibility for additional obfuscation
-- Compiled binary distribution (Linux amd64)
-- TOML configuration files
-- systemd service management
-- Automated installation scripts
+- **RSA-encrypted authentication** - Token invisible to TLS-terminating proxies (CloudFlare-proof)
+- **End-to-end AES-256-GCM encryption** - All tunnel data encrypted with PBKDF2-derived keys
+- **Reverse tunnel architecture** - Client connects TO server (bypasses outbound blocking)
+- **Single persistent WebSocket** - Bidirectional communication over HTTP/2 with TLS
+- **Flexible TCP port forwarding** - Port ranges, IP binding, custom mappings
+- **Built-in heartbeat** - Transport and application-layer keepalive
+- **CloudFlare compatible** - Works behind TLS-terminating proxies
+- **nginx reverse proxy** - Production-ready setup with Let's Encrypt
+- **Compiled binaries** - Linux amd64 (Ubuntu 22.04+ compatible)
+- **systemd services** - Automated start, restart, logging
+- **Easy installation** - One-command setup scripts
 
 ## Quick Start
 
@@ -47,6 +48,13 @@ Enter:
 ### Step 3: Use the Tunnel (In Iran)
 
 Users in Iran connect to the server's local ports (e.g., `localhost:8080`) and traffic is tunneled through to the NL client which makes the actual internet requests.
+
+## Documentation
+
+- **[Installation Guide](docs/installation.md)** - Detailed setup instructions for server and client
+- **[Configuration Reference](docs/configuration.md)** - Complete configuration options
+- **[Troubleshooting](docs/troubleshooting.md)** - Common issues and solutions
+- **[Security](docs/security.md)** - Encryption details and security considerations
 
 ## Architecture
 
@@ -116,11 +124,6 @@ token="V1StGXR8_Z5jdHi6B-my"
 [tunnels]
 ports=["8080=80", "8443=443"]
 
-[security]
-max_connections_per_client=100
-connection_timeout=300
-allowed_destinations=["0.0.0.0/0"]
-
 [logging]
 level="info"
 file="/var/log/ghostwire-server.log"
@@ -174,12 +177,24 @@ Binaries will be created in the `dist/` directory.
 
 ## Security
 
-GhostWire implements two layers of encryption:
+GhostWire implements multiple layers of security:
 
-1. **TLS Layer**: WebSocket over HTTPS protects against network eavesdropping
-2. **Application Layer**: AES-256-GCM encryption protects against intermediate inspection (including CloudFlare)
+1. **RSA-2048 Token Exchange**: Authentication tokens are encrypted with server's public key before transmission
+   - Protects tokens from TLS-terminating proxies (CloudFlare, nginx)
+   - Only server can decrypt token with its private key
 
-All message payloads are encrypted end-to-end using keys derived from the authentication token with PBKDF2-HMAC-SHA256 (100,000 iterations).
+2. **TLS Layer**: WebSocket over HTTPS (WSS) protects transport
+   - Prevents network eavesdropping
+   - Standard HTTPS encryption
+
+3. **Application Layer**: AES-256-GCM end-to-end encryption
+   - All tunnel data encrypted with keys derived from token (PBKDF2-HMAC-SHA256, 100k iterations)
+   - Protects against intermediate inspection
+   - Even CloudFlare cannot read tunnel contents
+
+4. **Built-in Heartbeat**: WebSocket ping/pong every 20 seconds
+   - Detects dead connections quickly
+   - Prevents timeout issues
 
 ## License
 
