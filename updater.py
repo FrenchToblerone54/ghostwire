@@ -81,18 +81,8 @@ class Updater:
             else:
                 logger.warning("Could not download checksum, skipping verification")
             executable_path=sys.argv[0]
-            import shutil
-            logger.info(f"Applying update to {new_version}...")
-            marker_path=os.path.join(tmpdir,"update.marker")
-            with open(marker_path,"w") as f:
-                f.write(binary_path)
-            backup_path=f"{executable_path}.old"
-            if os.path.exists(backup_path):
-                os.remove(backup_path)
-            if os.path.exists(executable_path):
-                os.rename(executable_path,backup_path)
-            shutil.move(binary_path,executable_path)
-            logger.info(f"Successfully updated to {new_version}, exiting for restart...")
+            logger.info(f"Successfully updated to {new_version}, restarting...")
+            os.execv("/bin/bash",["/bin/bash","-c",f"sleep 0.5; mv '{executable_path}' '{executable_path}.old' 2>/dev/null; mv '{binary_path}' '{executable_path}'; exec '{executable_path}' "+" ".join(sys.argv[1:])])
             return True
         except Exception as e:
             logger.error(f"Error downloading update: {e}",exc_info=True)
