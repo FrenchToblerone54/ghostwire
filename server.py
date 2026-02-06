@@ -81,7 +81,7 @@ class GhostWireServer:
         except websockets.exceptions.ConnectionClosed:
             logger.info(f"Client {client_id} disconnected")
         except Exception as e:
-            logger.error(f"Error handling client {client_id}: {e}")
+            logger.error(f"Error handling client {client_id}: {e}",exc_info=True)
         finally:
             self.websocket=None
             self.tunnel_manager.close_all()
@@ -146,7 +146,7 @@ class GhostWireServer:
     async def start(self):
         self.running=True
         logger.info(f"Starting GhostWire server on {self.config.listen_host}:{self.config.listen_port}")
-        async with websockets.serve(self.handle_client,self.config.listen_host,self.config.listen_port,max_size=None,ping_interval=20,ping_timeout=20):
+        async with websockets.serve(self.handle_client,self.config.listen_host,self.config.listen_port,max_size=None,ping_interval=None):
             await asyncio.Future()
 
     def stop(self):
