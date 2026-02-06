@@ -1,0 +1,8 @@
+[Unit]
+Description=GhostWire Updater
+After=network.target
+
+[Service]
+Type=oneshot
+User=root
+ExecStart=/usr/local/bin/ghostwire-updater.sh

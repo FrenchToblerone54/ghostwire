@@ -23,7 +23,7 @@ class Updater:
     def get_current_version(self):
         script_path=Path(sys.argv[0])
         if script_path.name.startswith(f"ghostwire-{self.component_name}"):
-            return "v0.2.1"
+            return "v0.2.3"
         return "dev"
 
     async def check_for_update(self):
@@ -61,6 +61,7 @@ class Updater:
             tmpdir="/tmp/ghostwire-update"
             os.makedirs(tmpdir,exist_ok=True)
             binary_path=os.path.join(tmpdir,f"ghostwire-{self.component_name}")
+            checksum_path=os.path.join(tmpdir,f"ghostwire-{self.component_name}.sha256")
             response=requests.get(binary_url,timeout=30,stream=True)
             if response.status_code!=200:
                 logger.error(f"Failed to download binary: HTTP {response.status_code}")
@@ -71,18 +72,13 @@ class Updater:
             os.chmod(binary_path,0o755)
             response=requests.get(checksum_url,timeout=10)
             if response.status_code==200:
-                checksum_content=response.text.strip()
-                parts=checksum_content.split()
-                expected_checksum=parts[0] if parts else checksum_content
-                if not self.verify_checksum(binary_path,expected_checksum):
-                    logger.error("Checksum verification failed")
-                    return False
-                logger.info("Checksum verified")
-            else:
-                logger.warning("Could not download checksum, skipping verification")
-            executable_path=sys.argv[0]
-            logger.info(f"Successfully updated to {new_version}, restarting...")
-            os.execv("/bin/bash",["/bin/bash","-c",f"sleep 0.5; mv '{executable_path}' '{executable_path}.old' 2>/dev/null; mv '{binary_path}' '{executable_path}'; exec '{executable_path}' "+" ".join(sys.argv[1:])])
+                with open(checksum_path,"w") as f:
+                    f.write(response.text.strip())
+            logger.info(f"Downloaded {new_version}, creating update marker...")
+            marker_path=os.path.join(tmpdir,"update.marker")
+            with open(marker_path,"w") as f:
+                f.write(new_version)
+            logger.info("Update ready. Run: sudo /usr/local/bin/install-update.sh to apply")
             return True
         except Exception as e:
             logger.error(f"Error downloading update: {e}",exc_info=True)

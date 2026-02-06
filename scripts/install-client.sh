@@ -88,6 +88,66 @@ RestartSec=5
 WantedBy=multi-user.target
 EOF
 
+echo "Installing auto-updater..."
+if [ ! -f /usr/local/bin/ghostwire-updater.sh ]; then
+    cat > /usr/local/bin/ghostwire-updater.sh <<'UPDATER_EOF'
+#!/bin/bash
+set -e
+UPDATE_DIR="/tmp/ghostwire-update"
+MARKER="$UPDATE_DIR/update.marker"
+if [ ! -f "$MARKER" ]; then
+    exit 0
+fi
+NEW_VERSION=$(cat "$MARKER")
+for COMPONENT in server client; do
+    BINARY="$UPDATE_DIR/ghostwire-$COMPONENT"
+    DEST="/usr/local/bin/ghostwire-$COMPONENT"
+    if [ -f "$BINARY" ]; then
+        echo "Updating ghostwire-$COMPONENT to $NEW_VERSION..."
+        if [ -f "$DEST" ]; then
+            mv "$DEST" "$DEST.old"
+        fi
+        mv "$BINARY" "$DEST"
+        chmod +x "$DEST"
+        systemctl restart "ghostwire-$COMPONENT" 2>/dev/null || true
+        echo "Updated ghostwire-$COMPONENT"
+    fi
+done
+rm -rf "$UPDATE_DIR"
+UPDATER_EOF
+    chmod +x /usr/local/bin/ghostwire-updater.sh
+fi
+
+if [ ! -f /etc/systemd/system/ghostwire-updater.service ]; then
+    cat > /etc/systemd/system/ghostwire-updater.service <<'EOF'
+[Unit]
+Description=GhostWire Auto-Updater
+After=network.target
+
+[Service]
+Type=oneshot
+User=root
+ExecStart=/usr/local/bin/ghostwire-updater.sh
+EOF
+
+    cat > /etc/systemd/system/ghostwire-updater.timer <<'EOF'
+[Unit]
+Description=GhostWire Auto-Updater Timer
+Requires=ghostwire-updater.service
+
+[Timer]
+OnCalendar=hourly
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+EOF
+
+    systemctl daemon-reload
+    systemctl enable ghostwire-updater.timer
+    systemctl start ghostwire-updater.timer
+fi
+
 systemctl daemon-reload
 
 echo "Enabling and starting GhostWire client..."
@@ -104,6 +164,9 @@ echo "Installation complete!"
 echo ""
 echo "Client is running and listening on configured ports"
 echo "Configuration: /etc/ghostwire/client.toml"
+echo ""
+echo "Auto-updater: Enabled (checks hourly)"
+echo "Manual update: sudo /usr/local/bin/ghostwire-updater.sh"
 echo ""
 echo "Useful commands:"
 echo "  sudo systemctl status ghostwire-client"

@@ -1,0 +1,10 @@
+[Unit]
+Description=GhostWire Updater Timer
+Requires=ghostwire-updater.service
+
+[Timer]
+OnCalendar=hourly
+Persistent=true
+
+[Install]
+WantedBy=timers.target
