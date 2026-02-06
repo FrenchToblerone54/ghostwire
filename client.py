@@ -21,9 +21,19 @@ class GhostWireClient:
         self.key=None
         self.running=False
         self.reconnect_delay=config.initial_delay
-        self.send_lock=asyncio.Lock()
+        self.send_queue=asyncio.Queue(maxsize=10000)
         self.shutdown_event=asyncio.Event()
 
+    async def sender_task(self):
+        try:
+            while True:
+                message=await self.send_queue.get()
+                if message is None:
+                    break
+                if self.websocket:
+                    await self.websocket.send(message)
+        except Exception as e:
+            logger.debug(f"Sender task error: {e}")
     async def connect(self):
         try:
             server_url=self.config.server_url
@@ -76,8 +86,10 @@ class GhostWireClient:
         except Exception as e:
             logger.error(f"Failed to connect to {remote_ip}:{remote_port}: {e}")
             error_msg=pack_error(conn_id,str(e),self.key)
-            async with self.send_lock:
-                await self.websocket.send(error_msg)
+            try:
+                self.send_queue.put_nowait(error_msg)
+            except asyncio.QueueFull:
+                logger.warning(f"Send queue full, dropping error message")
 
     async def forward_remote_to_websocket(self,conn_id,reader):
         try:
@@ -86,14 +98,16 @@ class GhostWireClient:
                 if not data:
                     break
                 message=pack_data(conn_id,data,self.key)
-                async with self.send_lock:
-                    await self.websocket.send(message)
+                try:
+                    self.send_queue.put_nowait(message)
+                except asyncio.QueueFull:
+                    logger.warning(f"Send queue full, dropping data for {conn_id}")
+                    break
         except Exception as e:
             logger.debug(f"Forward error for {conn_id}: {e}")
         finally:
             try:
-                async with self.send_lock:
-                    await self.websocket.send(pack_close(conn_id,0,self.key))
+                self.send_queue.put_nowait(pack_close(conn_id,0,self.key))
             except:
                 pass
             self.tunnel_manager.remove_connection(conn_id)
@@ -143,8 +157,10 @@ class GhostWireClient:
                 await asyncio.sleep(30)
                 if self.websocket:
                     timestamp=int(time.time()*1000)
-                    async with self.send_lock:
-                        await self.websocket.send(pack_ping(timestamp,self.key))
+                    try:
+                        self.send_queue.put_nowait(pack_ping(timestamp,self.key))
+                    except asyncio.QueueFull:
+                        logger.warning(f"Send queue full, skipping ping")
             except Exception as e:
                 logger.debug(f"Ping error: {e}")
                 break
@@ -154,12 +170,23 @@ class GhostWireClient:
         while self.running and not self.shutdown_event.is_set():
             if await self.connect():
                 try:
+                    while not self.send_queue.empty():
+                        try:
+                            self.send_queue.get_nowait()
+                        except:
+                            break
+                    sender_task=asyncio.create_task(self.sender_task())
                     ping_task=asyncio.create_task(self.ping_loop())
                     receive_task=asyncio.create_task(self.receive_messages())
                     shutdown_task=asyncio.create_task(self.shutdown_event.wait())
                     done,pending=await asyncio.wait({receive_task,shutdown_task},return_when=asyncio.FIRST_COMPLETED)
                     for task in pending:
                         task.cancel()
+                    await self.send_queue.put(None)
+                    try:
+                        await asyncio.wait_for(sender_task,timeout=2)
+                    except:
+                        sender_task.cancel()
                     ping_task.cancel()
                     if shutdown_task in done:
                         break
