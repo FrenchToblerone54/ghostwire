@@ -76,7 +76,7 @@ class GhostWireServer:
                     elif msg_type==MSG_PING:
                         timestamp=struct.unpack("!Q",payload)[0]
                         async with self.send_lock:
-                            await self.websocket.send(pack_pong(timestamp,self.key))
+                            await websocket.send(pack_pong(timestamp,self.key))
                     elif msg_type==MSG_PONG:
                         pass
         except websockets.exceptions.ConnectionClosed:
@@ -102,9 +102,14 @@ class GhostWireServer:
                 logger.error(f"No client connected, dropping connection {conn_id}")
                 self.tunnel_manager.remove_connection(conn_id)
                 return
-            connect_msg=pack_connect(conn_id,remote_ip,remote_port,self.key)
-            async with self.send_lock:
-                await self.websocket.send(connect_msg)
+            if self.websocket:
+                connect_msg=pack_connect(conn_id,remote_ip,remote_port,self.key)
+                async with self.send_lock:
+                    await self.websocket.send(connect_msg)
+            else:
+                logger.error(f"Client disconnected before sending CONNECT for {conn_id}")
+                self.tunnel_manager.remove_connection(conn_id)
+                return
             asyncio.create_task(self.forward_local_to_websocket(conn_id,reader))
         except Exception as e:
             logger.error(f"Error sending CONNECT: {e}")
@@ -116,6 +121,9 @@ class GhostWireServer:
                 data=await reader.read(65536)
                 if not data:
                     break
+                if not self.websocket:
+                    logger.debug(f"Client disconnected, stopping forward for {conn_id}")
+                    break
                 message=pack_data(conn_id,data,self.key)
                 async with self.send_lock:
                     await self.websocket.send(message)
@@ -123,8 +131,9 @@ class GhostWireServer:
             logger.debug(f"Forward error for {conn_id}: {e}")
         finally:
             try:
-                async with self.send_lock:
-                    await self.websocket.send(pack_close(conn_id,0,self.key))
+                if self.websocket:
+                    async with self.send_lock:
+                        await self.websocket.send(pack_close(conn_id,0,self.key))
             except:
                 pass
             self.tunnel_manager.remove_connection(conn_id)
