@@ -58,52 +58,42 @@ class Updater:
             binary_url=self.update_url
             checksum_url=f"{binary_url}.sha256"
             logger.info(f"Downloading update from {binary_url}")
-            with tempfile.TemporaryDirectory() as tmpdir:
-                binary_path=os.path.join(tmpdir,f"ghostwire-{self.component_name}")
-                checksum_path=os.path.join(tmpdir,f"ghostwire-{self.component_name}.sha256")
-                response=requests.get(binary_url,timeout=30,stream=True)
-                if response.status_code!=200:
-                    logger.error(f"Failed to download binary: HTTP {response.status_code}")
+            tmpdir="/tmp/ghostwire-update"
+            os.makedirs(tmpdir,exist_ok=True)
+            binary_path=os.path.join(tmpdir,f"ghostwire-{self.component_name}")
+            response=requests.get(binary_url,timeout=30,stream=True)
+            if response.status_code!=200:
+                logger.error(f"Failed to download binary: HTTP {response.status_code}")
+                return False
+            with open(binary_path,"wb") as f:
+                for chunk in response.iter_content(chunk_size=8192):
+                    f.write(chunk)
+            os.chmod(binary_path,0o755)
+            response=requests.get(checksum_url,timeout=10)
+            if response.status_code==200:
+                checksum_content=response.text.strip()
+                parts=checksum_content.split()
+                expected_checksum=parts[0] if parts else checksum_content
+                if not self.verify_checksum(binary_path,expected_checksum):
+                    logger.error("Checksum verification failed")
                     return False
-                with open(binary_path,"wb") as f:
-                    for chunk in response.iter_content(chunk_size=8192):
-                        f.write(chunk)
-                os.chmod(binary_path,0o755)
-                response=requests.get(checksum_url,timeout=10)
-                if response.status_code==200:
-                    checksum_content=response.text.strip()
-                    parts=checksum_content.split()
-                    expected_checksum=parts[0] if parts else checksum_content
-                    if not self.verify_checksum(binary_path,expected_checksum):
-                        logger.error("Checksum verification failed")
-                        return False
-                    logger.info("Checksum verified")
-                else:
-                    logger.warning("Could not download checksum, skipping verification")
-                import shutil
-                update_script_path=os.path.join(tmpdir,"apply_update.sh")
-                executable_path=sys.argv[0]
-                with open(update_script_path,"w") as f:
-                    f.write(f"""#!/bin/bash
-set -e
-sleep 1
-if [ -f "{executable_path}.old" ]; then
-    rm -f "{executable_path}.old"
-fi
-if [ -f "{executable_path}" ]; then
-    mv "{executable_path}" "{executable_path}.old"
-fi
-mv "{binary_path}" "{executable_path}"
-systemctl restart ghostwire-{self.component_name}
-rm -f "{update_script_path}"
-""")
-                os.chmod(update_script_path,0o755)
-                logger.info(f"Update downloaded for {new_version}, will apply on restart")
-                import subprocess
-                subprocess.Popen(["/bin/bash",update_script_path],start_new_session=True)
-                await asyncio.sleep(2)
-                logger.info("Initiating graceful shutdown for update...")
-                return True
+                logger.info("Checksum verified")
+            else:
+                logger.warning("Could not download checksum, skipping verification")
+            executable_path=sys.argv[0]
+            import shutil
+            logger.info(f"Applying update to {new_version}...")
+            marker_path=os.path.join(tmpdir,"update.marker")
+            with open(marker_path,"w") as f:
+                f.write(binary_path)
+            backup_path=f"{executable_path}.old"
+            if os.path.exists(backup_path):
+                os.remove(backup_path)
+            if os.path.exists(executable_path):
+                os.rename(executable_path,backup_path)
+            shutil.move(binary_path,executable_path)
+            logger.info(f"Successfully updated to {new_version}, exiting for restart...")
+            return True
         except Exception as e:
             logger.error(f"Error downloading update: {e}",exc_info=True)
             return False
@@ -120,6 +110,8 @@ rm -f "{update_script_path}"
                     logger.info(f"Updating to {new_version}...")
                     success=await self.download_update(new_version)
                     if success:
+                        logger.info("Update complete, shutting down for systemd restart...")
+                        shutdown_event.set()
                         break
             except asyncio.CancelledError:
                 break
