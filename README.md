@@ -131,7 +131,7 @@ ports=["8080=80", "8443=443"]
 enabled=true
 host="127.0.0.1"
 port=9090
-path="/aBcDeFgHiJkLmNoPqRsT"
+path="aBcDeFgHiJkLmNoPqRsT"
 
 [logging]
 level="info"
