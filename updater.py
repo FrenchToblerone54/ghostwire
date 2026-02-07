@@ -23,7 +23,7 @@ class Updater:
     def get_current_version(self):
         script_path=Path(sys.argv[0])
         if script_path.name.startswith(f"ghostwire-{self.component_name}"):
-            return "v0.2.4"
+            return "v0.3.1"
         return "dev"
 
     async def check_for_update(self):
