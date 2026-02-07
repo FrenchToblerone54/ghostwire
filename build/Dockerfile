@@ -17,7 +17,7 @@ RUN apt-get update && apt-get install -y \
     && apt-get install -y python3.13 python3.13-dev python3.13-venv \
     && rm -rf /var/lib/apt/lists/*
 
-RUN wget https://bootstrap.pypa.io/get-pip.py && python3.13 get-pip.py && rm get-pip.py
+RUN wget https://bootstrap.pypa.io/get-pip.py && python3.13 get-pip.py && rm get-pip.py && apt-get remove -y --purge python3-blinker python3-flask
 
 WORKDIR /build
 

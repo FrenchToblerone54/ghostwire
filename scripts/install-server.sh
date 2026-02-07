@@ -95,7 +95,7 @@ if [ ! -f /etc/ghostwire/server.toml ]; then
         PANEL_HOST=${PANEL_HOST:-127.0.0.1}
         read -p "  Panel listen port [9090]: " PANEL_PORT
         PANEL_PORT=${PANEL_PORT:-9090}
-        PANEL_PATH=$(python3.13 -c "from nanoid import generate; print(generate(size=20))")
+        PANEL_PATH=$(/usr/local/bin/ghostwire-server --generate-token)
         PANEL_CONFIG="
 [panel]
 enabled=true
