@@ -32,6 +32,13 @@ def _load_html():
     with open(os.path.join(_get_frontend_dir(),"index.html"),"r") as f:
         return f.read()
 
+def _load_error_html(code):
+    try:
+        with open(os.path.join(_get_frontend_dir(),f"{code}.html"),"r") as f:
+            return f.read()
+    except:
+        return f"<h1>Error {code}</h1>",code
+
 def get_uptime():
     uptime_seconds=int(time.time()-server_start_time)
     days=uptime_seconds//86400
@@ -193,6 +200,26 @@ def api_restart():
 def api_stop():
     success=stop_service()
     return jsonify({"success":success})
+
+@app.errorhandler(400)
+def error_400(e):
+    return _load_error_html(400)
+
+@app.errorhandler(403)
+def error_403(e):
+    return _load_error_html(403)
+
+@app.errorhandler(404)
+def error_404(e):
+    return _load_error_html(404)
+
+@app.errorhandler(405)
+def error_405(e):
+    return _load_error_html(405)
+
+@app.errorhandler(500)
+def error_500(e):
+    return _load_error_html(500)
 
 def start_panel(config):
     global panel_config

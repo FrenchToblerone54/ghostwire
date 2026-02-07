@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>405 - Method Not Allowed</title>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700;800&display=swap');
+*{margin:0;padding:0;box-sizing:border-box}
+:root{
+--bg:#1a1d2e;
+--bg-card:#252738;
+--text:#c3c8d8;
+--text-muted:#6b7280;
+--accent:#00e5a0;
+--danger:#ef4444;
+--border:#2e3148;
+--radius:8px;
+}
+body{font-family:'Nunito',sans-serif;background:var(--bg);color:var(--text);min-height:100vh;display:flex;align-items:center;justify-content:center;overflow:hidden}
+.error-container{text-align:center;padding:40px;max-width:600px;position:relative;z-index:10}
+.error-code{font-size:10em;font-weight:800;color:#f59e0b;line-height:1;margin-bottom:20px;text-shadow:0 0 40px rgba(245,158,11,0.3);animation:glitch 2s infinite}
+.error-title{font-size:2.2em;font-weight:700;color:#fff;margin-bottom:16px;letter-spacing:-0.5px}
+.error-message{font-size:1.1em;color:var(--text-muted);margin-bottom:40px;line-height:1.6}
+.error-actions{display:flex;gap:16px;justify-content:center}
+.btn{padding:14px 28px;border-radius:var(--radius);border:none;font-size:0.95em;font-weight:700;cursor:pointer;font-family:'Nunito',sans-serif;transition:all 0.3s;text-decoration:none;display:inline-block}
+.btn-accent{background:var(--accent);color:#1a1d2e}
+.btn-accent:hover{background:#00cc8e;transform:translateY(-2px);box-shadow:0 8px 20px rgba(0,229,160,0.4)}
+.btn-ghost{background:transparent;color:var(--text);border:1px solid var(--border)}
+.btn-ghost:hover{border-color:var(--accent);color:var(--accent)}
+.status-indicator{position:absolute;top:40px;right:40px;display:flex;align-items:center;gap:12px;background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius);padding:12px 20px}
+.status-dot{width:10px;height:10px;border-radius:50%;background:#f59e0b;box-shadow:0 0 10px #f59e0b;animation:pulse 2s infinite}
+.status-text{font-size:0.85em;font-weight:700;color:#f59e0b}
+.bg-circuit{position:fixed;top:0;left:0;width:100%;height:100%;opacity:0.03;pointer-events:none;background-image:radial-gradient(circle at 2px 2px,var(--accent) 1px,transparent 0);background-size:40px 40px}
+.warning-icon{width:80px;height:80px;margin:0 auto 30px;opacity:0.6}
+@keyframes glitch{0%,100%{text-shadow:0 0 40px rgba(245,158,11,0.3)}50%{text-shadow:2px 2px 0 rgba(0,229,160,0.3),-2px -2px 0 rgba(245,158,11,0.3)}}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:0.5}}
+</style>
+</head>
+<body>
+<div class="bg-circuit"></div>
+<div class="status-indicator">
+<span class="status-dot"></span>
+<span class="status-text">Error</span>
+</div>
+<div class="error-container">
+<svg class="warning-icon" viewBox="0 0 24 24" fill="none" stroke="#f59e0b" stroke-width="2">
+<path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
+<line x1="12" y1="9" x2="12" y2="13"/>
+<circle cx="12" cy="17" r="0.5" fill="#f59e0b"/>
+</svg>
+<div class="error-code">405</div>
+<h1 class="error-title">Method Not Allowed</h1>
+<p class="error-message">The request method is not supported for this resource. Please check your request and try again.</p>
+<div class="error-actions">
+<a href="javascript:history.back()" class="btn btn-ghost">Go Back</a>
+<a href="/" class="btn btn-accent">Return Home</a>
+</div>
+</div>
+</body>
+</html>
