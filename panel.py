@@ -18,7 +18,7 @@ server_start_time=time.time()
 
 def panel_route(path="",methods=["GET"]):
     def decorator(func):
-        @app.route(f"/<path:panel_path>{path}" if panel_config.panel_path else path, methods=methods)
+        @app.route(f"/<path:panel_path>{path}",methods=methods)
         @functools.wraps(func)
         def wrapper(panel_path,*args,**kwargs):
             return func(*args,**kwargs)
