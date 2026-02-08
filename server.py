@@ -18,6 +18,14 @@ from panel import start_panel
 logging.basicConfig(level=logging.INFO,format="%(asctime)s [%(levelname)s] %(message)s")
 logger=logging.getLogger(__name__)
 
+def setup_logging(config):
+    level=getattr(logging,config.log_level.upper(),logging.INFO)
+    logging.getLogger().setLevel(level)
+    if config.log_file:
+        handler=logging.FileHandler(config.log_file)
+        handler.setFormatter(logging.Formatter("%(asctime)s [%(levelname)s] %(message)s"))
+        logging.getLogger().addHandler(handler)
+
 class GhostWireServer:
     def __init__(self,config):
         self.config=config
@@ -29,7 +37,7 @@ class GhostWireServer:
         self.send_queue=None
         self.shutdown_event=asyncio.Event()
         self.last_ping_time=0
-        self.ping_timeout=45
+        self.ping_timeout=60
         logger.info("Generating RSA key pair for secure authentication...")
         self.private_key,self.public_key=generate_rsa_keypair()
         self.updater=Updater("server")
@@ -49,6 +57,9 @@ class GhostWireServer:
     async def handle_client(self,websocket):
         client_id=f"{websocket.remote_address[0]}:{websocket.remote_address[1]}"
         logger.info(f"New connection from {client_id}")
+        if self.websocket is not None:
+            logger.warning(f"Rejecting {client_id}: client already connected")
+            return
         authenticated=False
         sender=None
         ping_monitor=None
@@ -123,9 +134,10 @@ class GhostWireServer:
                     sender.cancel()
             if ping_monitor:
                 ping_monitor.cancel()
-            self.websocket=None
-            self.send_queue=None
-            self.tunnel_manager.close_all()
+            if authenticated:
+                self.websocket=None
+                self.send_queue=None
+                self.tunnel_manager.close_all()
 
     async def ping_monitor_loop(self):
         while self.running and not self.shutdown_event.is_set():
@@ -237,7 +249,11 @@ def main():
     parser=argparse.ArgumentParser(description="GhostWire Server")
     parser.add_argument("-c","--config",help="Path to configuration file")
     parser.add_argument("--generate-token",action="store_true",help="Generate authentication token and exit")
+    parser.add_argument("--version",action="store_true",help="Print version and exit")
     args=parser.parse_args()
+    if args.version:
+        print(Updater("server").current_version)
+        sys.exit(0)
     if args.generate_token:
         from auth import generate_token
         print(generate_token())
@@ -250,6 +266,7 @@ def main():
     except Exception as e:
         logger.error(f"Failed to load configuration: {e}")
         sys.exit(1)
+    setup_logging(config)
     server=GhostWireServer(config)
     loop=asyncio.new_event_loop()
     asyncio.set_event_loop(loop)

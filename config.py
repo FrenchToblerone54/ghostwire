@@ -88,6 +88,7 @@ class ClientConfig:
         self.cloudflare_ips=config["cloudflare"].get("ips",[])
         self.cloudflare_host=config["cloudflare"].get("host","")
         self.cloudflare_check_interval=config["cloudflare"].get("check_interval",300)
+        self.cloudflare_max_connection_time=config["cloudflare"].get("max_connection_time",1740)
         self.log_level=config["logging"].get("level","info")
         self.log_file=config["logging"].get("file","/var/log/ghostwire-client.log")
         self.auto_update=config["server"].get("auto_update",True)

@@ -15,6 +15,14 @@ from updater import Updater
 logging.basicConfig(level=logging.INFO,format="%(asctime)s [%(levelname)s] %(message)s")
 logger=logging.getLogger(__name__)
 
+def setup_logging(config):
+    level=getattr(logging,config.log_level.upper(),logging.INFO)
+    logging.getLogger().setLevel(level)
+    if config.log_file:
+        handler=logging.FileHandler(config.log_file)
+        handler.setFormatter(logging.Formatter("%(asctime)s [%(levelname)s] %(message)s"))
+        logging.getLogger().addHandler(handler)
+
 class GhostWireClient:
     def __init__(self,config):
         self.config=config
@@ -27,8 +35,8 @@ class GhostWireClient:
         self.shutdown_event=asyncio.Event()
         self.last_ping_time=0
         self.last_pong_time=0
-        self.ping_interval=30
-        self.ping_timeout=45
+        self.ping_interval=10
+        self.ping_timeout=60
         self.updater=Updater("client")
 
     async def sender_task(self,send_queue,stop_event):
@@ -217,7 +225,14 @@ class GhostWireClient:
                     timeout_monitor=asyncio.create_task(self.ping_timeout_monitor())
                     receive_task=asyncio.create_task(self.receive_messages())
                     shutdown_task=asyncio.create_task(self.shutdown_event.wait())
-                    done,pending=await asyncio.wait({receive_task,shutdown_task},return_when=asyncio.FIRST_COMPLETED)
+                    wait_tasks={receive_task,shutdown_task}
+                    cf_timer=None
+                    if self.config.cloudflare_enabled and self.config.cloudflare_max_connection_time>0:
+                        cf_timer=asyncio.create_task(asyncio.sleep(self.config.cloudflare_max_connection_time))
+                        wait_tasks.add(cf_timer)
+                    done,pending=await asyncio.wait(wait_tasks,return_when=asyncio.FIRST_COMPLETED)
+                    if cf_timer and cf_timer in done:
+                        logger.info(f"CloudFlare connection limit, reconnecting proactively")
                     for task in pending:
                         task.cancel()
                     stop_event.set()
@@ -263,7 +278,11 @@ def main():
     parser=argparse.ArgumentParser(description="GhostWire Client")
     parser.add_argument("-c","--config",help="Path to configuration file")
     parser.add_argument("--generate-token",action="store_true",help="Generate authentication token and exit")
+    parser.add_argument("--version",action="store_true",help="Print version and exit")
     args=parser.parse_args()
+    if args.version:
+        print(Updater("client").current_version)
+        sys.exit(0)
     if args.generate_token:
         from auth import generate_token
         print(generate_token())
@@ -276,6 +295,7 @@ def main():
     except Exception as e:
         logger.error(f"Failed to load configuration: {e}")
         sys.exit(1)
+    setup_logging(config)
     client=GhostWireClient(config)
     loop=asyncio.new_event_loop()
     asyncio.set_event_loop(loop)

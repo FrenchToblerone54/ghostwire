@@ -98,6 +98,7 @@ enabled=false
 ips=[]
 host=""
 check_interval=300
+max_connection_time=1740
 
 [logging]
 level="info"
