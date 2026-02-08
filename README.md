@@ -167,6 +167,7 @@ enabled=false
 ips=[]
 host=""
 check_interval=300
+max_connection_time=1740
 
 [logging]
 level="info"
@@ -217,18 +218,29 @@ Without these timeouts, NPM will drop the persistent WebSocket connection after 
 
 1. Enable **WebSockets** in CloudFlare Dashboard → Network
 2. Set SSL/TLS mode to **Full (Strict)** if using Let's Encrypt on your server
-3. CloudFlare's free tier has a 100-second WebSocket timeout — GhostWire handles this with application-level ping/pong (30s interval) which keeps the connection alive
+3. CloudFlare's free tier has a 100-second idle timeout and a **30-minute hard connection limit** — set `enabled=true` in the client's `[cloudflare]` section to enable proactive reconnect before the limit (`max_connection_time=1740` by default = 29 minutes)
+4. With `enabled=true` and empty `ips`/`host`, the IP selection is skipped but the proactive reconnect still applies
 
 **If experiencing authentication timeouts behind CloudFlare:** This is caused by CloudFlare's edge adding latency to the initial WebSocket handshake. GhostWire allows 30 seconds for authentication which should be sufficient.
 
 ## systemd Management
 
+**Server:**
 ```bash
 sudo systemctl start ghostwire-server
 sudo systemctl stop ghostwire-server
 sudo systemctl restart ghostwire-server
 sudo systemctl status ghostwire-server
 sudo journalctl -u ghostwire-server -f
+```
+
+**Client:**
+```bash
+sudo systemctl start ghostwire-client
+sudo systemctl stop ghostwire-client
+sudo systemctl restart ghostwire-client
+sudo systemctl status ghostwire-client
+sudo journalctl -u ghostwire-client -f
 ```
 
 ## Building from Source
