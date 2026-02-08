@@ -86,14 +86,14 @@ def get_connection_status():
 
 def restart_service():
     try:
-        subprocess.run(["sudo","systemctl","restart","ghostwire-server"],timeout=10,check=True)
+        subprocess.run(["systemctl","restart","ghostwire-server"],timeout=10,check=True)
         return True
     except:
         return False
 
 def stop_service():
     try:
-        subprocess.run(["sudo","systemctl","stop","ghostwire-server"],timeout=10,check=True)
+        subprocess.run(["systemctl","stop","ghostwire-server"],timeout=10,check=True)
         return True
     except:
         return False
@@ -235,10 +235,6 @@ def start_panel(config):
     thread.start()
 
 def _register_routes():
-    if panel_config.panel_path:
-        route_prefix=f"/<path:panel_path>{''}"
-    else:
-        route_prefix=""
+    prefix=f"/{panel_config.panel_path}" if panel_config.panel_path else ""
     for path,methods,func in _routes:
-        full_path=f"{route_prefix}{path}" if route_prefix else path
-        app.add_url_rule(full_path,func.__name__,func,methods=methods)
+        app.route(f"{prefix}{path}",methods=methods)(func)

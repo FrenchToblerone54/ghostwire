@@ -173,6 +173,54 @@ level="info"
 file="/var/log/ghostwire-client.log"
 ```
 
+## Proxy Configuration
+
+### nginx (manual setup)
+
+For WebSocket proxying, ensure the nginx config includes these critical directives:
+
+```nginx
+location /ws {
+    proxy_pass http://127.0.0.1:8443;
+    proxy_http_version 1.1;
+    proxy_set_header Upgrade $http_upgrade;
+    proxy_set_header Connection "upgrade";
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_read_timeout 86400;
+    proxy_send_timeout 86400;
+    proxy_buffering off;
+    proxy_request_buffering off;
+    tcp_nodelay on;
+}
+```
+
+`proxy_buffering off` and `proxy_request_buffering off` are critical — without these, nginx buffers WebSocket frames causing significant throughput degradation.
+
+### nginx Proxy Manager (NPM)
+
+1. Create a new Proxy Host pointing to `127.0.0.1:8443`
+2. Enable **"Websockets Support"** toggle on the Details tab
+3. Under the **Advanced** tab, add these custom directives:
+
+```nginx
+proxy_read_timeout 86400;
+proxy_send_timeout 86400;
+proxy_buffering off;
+proxy_request_buffering off;
+tcp_nodelay on;
+```
+
+Without these timeouts, NPM will drop the persistent WebSocket connection after ~60 seconds.
+
+### CloudFlare
+
+1. Enable **WebSockets** in CloudFlare Dashboard → Network
+2. Set SSL/TLS mode to **Full (Strict)** if using Let's Encrypt on your server
+3. CloudFlare's free tier has a 100-second WebSocket timeout — GhostWire handles this with application-level ping/pong (30s interval) which keeps the connection alive
+
+**If experiencing authentication timeouts behind CloudFlare:** This is caused by CloudFlare's edge adding latency to the initial WebSocket handshake. GhostWire allows 30 seconds for authentication which should be sufficient.
+
 ## systemd Management
 
 ```bash

@@ -171,19 +171,6 @@ else
     WS_PORT=${WS_PORT:-8443}
 fi
 
-echo "Creating system user..."
-if ! id -u ghostwire >/dev/null 2>&1; then
-    useradd -r -s /bin/false ghostwire
-fi
-
-echo "Configuring sudoers for auto-update and panel..."
-cat > /etc/sudoers.d/ghostwire <<EOF
-ghostwire ALL=(ALL) NOPASSWD: /usr/bin/mv /usr/local/bin/ghostwire-*
-ghostwire ALL=(ALL) NOPASSWD: /bin/systemctl restart ghostwire-server
-ghostwire ALL=(ALL) NOPASSWD: /bin/systemctl stop ghostwire-server
-EOF
-chmod 440 /etc/sudoers.d/ghostwire
-
 echo "Installing systemd service..."
 cat > /etc/systemd/system/ghostwire-server.service <<EOF
 [Unit]
@@ -192,7 +179,6 @@ After=network.target
 
 [Service]
 Type=simple
-User=ghostwire
 ExecStart=/usr/local/bin/ghostwire-server -c /etc/ghostwire/server.toml
 Restart=always
 RestartSec=5
@@ -263,6 +249,9 @@ server {
         proxy_set_header X-Real-IP \$remote_addr;
         proxy_read_timeout 86400;
         proxy_send_timeout 86400;
+        proxy_buffering off;
+        proxy_request_buffering off;
+        tcp_nodelay on;
     }
 
     location / {

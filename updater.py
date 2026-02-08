@@ -23,7 +23,7 @@ class Updater:
     def get_current_version(self):
         script_path=Path(sys.argv[0])
         if script_path.name.startswith(f"ghostwire-{self.component_name}"):
-            return "v0.3.3"
+            return "v0.3.4"
         return "dev"
 
     async def check_for_update(self):
@@ -82,7 +82,7 @@ class Updater:
                 logger.warning("Could not download checksum, skipping verification")
             executable_path=sys.argv[0]
             logger.info(f"Successfully updated to {new_version}, restarting...")
-            os.execv("/bin/bash",["/bin/bash","-c",f"sleep 0.5; sudo mv '{executable_path}' '{executable_path}.old' 2>/dev/null; sudo mv '{binary_path}' '{executable_path}'; exec '{executable_path}' "+" ".join(sys.argv[1:])])
+            os.execv("/bin/bash",["/bin/bash","-c",f"sleep 0.5; mv '{executable_path}' '{executable_path}.old' 2>/dev/null; mv '{binary_path}' '{executable_path}'; exec '{executable_path}' "+" ".join(sys.argv[1:])])
             return True
         except Exception as e:
             logger.error(f"Error downloading update: {e}",exc_info=True)

@@ -59,7 +59,7 @@ class GhostWireServer:
             pubkey_msg=pack_pubkey(self.public_key)
             await websocket.send(pubkey_msg)
             buffer=b""
-            auth_msg=await asyncio.wait_for(websocket.recv(),timeout=10)
+            auth_msg=await asyncio.wait_for(websocket.recv(),timeout=30)
             buffer+=auth_msg
             if len(buffer)>=9:
                 msg_type,conn_id,encrypted_token,consumed=unpack_message(buffer,None)

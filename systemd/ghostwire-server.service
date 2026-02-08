@@ -4,7 +4,6 @@ After=network.target
 
 [Service]
 Type=simple
-User=ghostwire
 ExecStart=/usr/local/bin/ghostwire-server -c /etc/ghostwire/server.toml
 Restart=always
 RestartSec=5

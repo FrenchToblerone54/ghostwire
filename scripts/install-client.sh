@@ -107,19 +107,6 @@ EOF
     echo "Configuration created at /etc/ghostwire/client.toml"
 fi
 
-echo "Creating system user..."
-if ! id -u ghostwire >/dev/null 2>&1; then
-    useradd -r -s /bin/false ghostwire
-fi
-
-echo "Configuring sudoers for auto-update..."
-cat > /etc/sudoers.d/ghostwire <<EOF
-ghostwire ALL=(ALL) NOPASSWD: /usr/bin/mv /usr/local/bin/ghostwire-*
-ghostwire ALL=(ALL) NOPASSWD: /bin/systemctl restart ghostwire-server
-ghostwire ALL=(ALL) NOPASSWD: /bin/systemctl stop ghostwire-server
-EOF
-chmod 440 /etc/sudoers.d/ghostwire
-
 echo "Installing systemd service..."
 cat > /etc/systemd/system/ghostwire-client.service <<EOF
 [Unit]
@@ -128,7 +115,6 @@ After=network.target
 
 [Service]
 Type=simple
-User=ghostwire
 ExecStart=/usr/local/bin/ghostwire-client -c /etc/ghostwire/client.toml
 Restart=always
 RestartSec=5
