@@ -200,7 +200,7 @@ def api_logs_stream():
             for line in iter(proc.stdout.readline,""):
                 if not line:
                     break
-                yield f"data: {line}\n\n"
+                yield f"data: {line.rstrip()}\n\n"
         except Exception as e:
             yield f"data: Error streaming logs: {e}\n\n"
     return Response(generate(),mimetype="text/event-stream")

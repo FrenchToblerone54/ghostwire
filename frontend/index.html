@@ -410,7 +410,7 @@ loadLogs();
 logStream=new EventSource(API+"/api/logs/stream");
 logStream.onmessage=function(e){
 const el=document.getElementById("log-viewer");
-el.textContent+=e.data;
+el.textContent+=e.data+"\n";
 el.scrollTop=el.scrollHeight;
 };
 logStream.onerror=function(){
