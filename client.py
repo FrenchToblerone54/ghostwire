@@ -41,16 +41,26 @@ class GhostWireClient:
 
     async def sender_task(self,send_queue,stop_event):
         try:
-            while not stop_event.is_set():
-                try:
-                    message=await asyncio.wait_for(send_queue.get(),timeout=0.1)
-                    if self.websocket:
-                        await self.websocket.send(message)
-                except asyncio.TimeoutError:
-                    continue
+            pending_sends=set()
+            while not stop_event.is_set() or not send_queue.empty():
+                while len(pending_sends)<100 and not send_queue.empty():
+                    try:
+                        message=send_queue.get_nowait()
+                        if self.websocket:
+                            task=asyncio.create_task(self.websocket.send(message))
+                            pending_sends.add(task)
+                            task.add_done_callback(pending_sends.discard)
+                    except asyncio.QueueEmpty:
+                        break
+                if pending_sends:
+                    done,pending_sends=await asyncio.wait(pending_sends,timeout=0.01,return_when=asyncio.FIRST_COMPLETED)
+                else:
+                    await asyncio.sleep(0.01)
         except Exception as e:
             logger.debug(f"Sender task error: {e}")
         finally:
+            if pending_sends:
+                await asyncio.wait(pending_sends,timeout=2)
             logger.debug("Sender task stopped")
     async def connect(self):
         try:
