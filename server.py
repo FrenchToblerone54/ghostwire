@@ -120,8 +120,8 @@ class GhostWireServer:
         authenticated=False
         sender=None
         ping_monitor=None
-        send_queue=asyncio.Queue(maxsize=8192)
-        control_queue=asyncio.Queue(maxsize=8192)
+        send_queue=asyncio.Queue(maxsize=32768)
+        control_queue=asyncio.Queue(maxsize=16384)
         stop_event=asyncio.Event()
         self.last_ping_time=time.time()
         try:
@@ -314,7 +314,7 @@ class GhostWireServer:
         update_task=None
         if self.config.auto_update:
             update_task=asyncio.create_task(self.updater.update_loop(self.shutdown_event))
-        async with websockets.serve(self.handle_client,self.config.listen_host,self.config.listen_port,max_size=None,max_queue=1024,ping_interval=None,compression=None,write_limit=1048576,process_request=self.process_request):
+        async with websockets.serve(self.handle_client,self.config.listen_host,self.config.listen_port,max_size=None,max_queue=32768,ping_interval=None,compression=None,write_limit=16777216,process_request=self.process_request):
             await self.shutdown_event.wait()
         if update_task:
             update_task.cancel()

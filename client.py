@@ -132,7 +132,7 @@ class GhostWireClient:
                 if best_ip:
                     server_url=self.config.server_url.replace(self.config.cloudflare_host,best_ip)
                     logger.info(f"Using CloudFlare IP: {best_ip}")
-            self.websocket=await websockets.connect(server_url,max_size=None,max_queue=1024,ping_interval=None,compression=None,write_limit=1048576,close_timeout=5)
+            self.websocket=await websockets.connect(server_url,max_size=None,max_queue=32768,ping_interval=None,compression=None,write_limit=16777216,close_timeout=5)
             pubkey_msg=await asyncio.wait_for(self.websocket.recv(),timeout=10)
             if len(pubkey_msg)<9:
                 raise ValueError("Invalid public key message")
@@ -162,7 +162,7 @@ class GhostWireClient:
             try:
                 test_url=self.config.server_url.replace(self.config.cloudflare_host,ip)
                 start=time.time()
-                ws=await asyncio.wait_for(websockets.connect(test_url,max_size=None,ping_interval=None,compression=None,write_limit=1048576),timeout=5)
+                ws=await asyncio.wait_for(websockets.connect(test_url,max_size=None,ping_interval=None,compression=None,write_limit=16777216),timeout=5)
                 latency=time.time()-start
                 await ws.close()
                 if latency<best_latency:
@@ -319,8 +319,8 @@ class GhostWireClient:
             update_task=asyncio.create_task(self.updater.update_loop(self.shutdown_event))
         while self.running and not self.shutdown_event.is_set():
             if await self.connect():
-                send_queue=asyncio.Queue(maxsize=8192)
-                control_queue=asyncio.Queue(maxsize=8192)
+                send_queue=asyncio.Queue(maxsize=32768)
+                control_queue=asyncio.Queue(maxsize=16384)
                 stop_event=asyncio.Event()
                 self.send_queue=send_queue
                 self.control_queue=control_queue
