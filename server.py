@@ -44,13 +44,18 @@ class GhostWireServer:
         self.updater=Updater("server",check_interval=config.update_check_interval,check_on_startup=config.update_check_on_startup)
 
     async def sender_task(self,websocket,send_queue,stop_event):
+        async def safe_send(msg):
+            try:
+                await websocket.send(msg)
+            except Exception:
+                pass
         try:
             pending_sends=set()
             while not stop_event.is_set() or not send_queue.empty():
                 while len(pending_sends)<100 and not send_queue.empty():
                     try:
                         message=send_queue.get_nowait()
-                        task=asyncio.create_task(websocket.send(message))
+                        task=asyncio.create_task(safe_send(message))
                         pending_sends.add(task)
                         task.add_done_callback(pending_sends.discard)
                     except asyncio.QueueEmpty:
