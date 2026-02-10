@@ -112,7 +112,7 @@ body{font-family:'Nunito',sans-serif;background:var(--bg);color:var(--text);line
 <body>
 <aside class="sidebar" id="sidebar">
 <div class="sidebar-header">
-<h2>GhostWire<span class="version-tag" id="sidebar-version">v0.6.2</span></h2>
+<h2>GhostWire<span class="version-tag" id="sidebar-version">...</span></h2>
 <span>Management Panel</span>
 </div>
 <nav class="sidebar-nav">
@@ -472,6 +472,7 @@ document.getElementById("speed-up").textContent=fmtSpeed(speed.upload);
 document.getElementById("speed-down").textContent=fmtSpeed(speed.download);
 document.getElementById("total-sent").textContent=fmtBytes(sys.net_sent);
 document.getElementById("total-recv").textContent=fmtBytes(sys.net_recv);
+document.getElementById("sidebar-version").textContent=status.server_version||"...";
 document.getElementById("server-version").textContent=status.server_version||"-";
 const clientVerBadge=document.getElementById("client-version-badge");
 if(status.client_version){
