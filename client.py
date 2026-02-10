@@ -40,21 +40,16 @@ class GhostWireClient:
         self.updater=Updater("client",check_interval=config.update_check_interval,check_on_startup=config.update_check_on_startup)
 
     async def sender_task(self,send_queue,stop_event):
-        async def safe_send(msg):
-            try:
-                if self.websocket:
-                    await self.websocket.send(msg)
-            except Exception:
-                pass
         try:
             pending_sends=set()
             while not stop_event.is_set() or not send_queue.empty():
                 while len(pending_sends)<100 and not send_queue.empty():
                     try:
                         message=send_queue.get_nowait()
-                        task=asyncio.create_task(safe_send(message))
-                        pending_sends.add(task)
-                        task.add_done_callback(pending_sends.discard)
+                        if self.websocket:
+                            task=asyncio.create_task(self.websocket.send(message))
+                            pending_sends.add(task)
+                            task.add_done_callback(pending_sends.discard)
                     except asyncio.QueueEmpty:
                         break
                 if pending_sends:
@@ -154,12 +149,6 @@ class GhostWireClient:
 
     async def receive_messages(self):
         buffer=b""
-        pending_handlers=set()
-        async def safe_handler(coro):
-            try:
-                await coro
-            except Exception as e:
-                logger.error(f"Handler error: {e}",exc_info=True)
         try:
             async for message in self.websocket:
                 self.last_ping_time=time.time()
@@ -172,17 +161,9 @@ class GhostWireClient:
                         break
                     if msg_type==MSG_CONNECT:
                         remote_ip,remote_port=unpack_connect(payload)
-                        while len(pending_handlers)>=50:
-                            done,pending_handlers=await asyncio.wait(pending_handlers,return_when=asyncio.FIRST_COMPLETED)
-                        task=asyncio.create_task(safe_handler(self.handle_connect(conn_id,remote_ip,remote_port)))
-                        pending_handlers.add(task)
-                        task.add_done_callback(pending_handlers.discard)
+                        await self.handle_connect(conn_id,remote_ip,remote_port)
                     elif msg_type==MSG_DATA:
-                        while len(pending_handlers)>=50:
-                            done,pending_handlers=await asyncio.wait(pending_handlers,return_when=asyncio.FIRST_COMPLETED)
-                        task=asyncio.create_task(safe_handler(self.handle_data(conn_id,payload)))
-                        pending_handlers.add(task)
-                        task.add_done_callback(pending_handlers.discard)
+                        await self.handle_data(conn_id,payload)
                     elif msg_type==MSG_CLOSE:
                         self.tunnel_manager.remove_connection(conn_id)
                     elif msg_type==MSG_ERROR:
@@ -202,13 +183,6 @@ class GhostWireClient:
             logger.warning("Connection closed by server")
         except Exception as e:
             logger.error(f"Receive error: {e}",exc_info=True)
-        finally:
-            if pending_handlers:
-                try:
-                    await asyncio.wait_for(asyncio.wait(pending_handlers),timeout=2)
-                except asyncio.TimeoutError:
-                    for task in pending_handlers:
-                        task.cancel()
 
     async def handle_data(self,conn_id,payload):
         connection=self.tunnel_manager.get_connection(conn_id)
