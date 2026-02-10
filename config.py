@@ -71,7 +71,7 @@ class ServerConfig:
         self.port_mappings=parse_port_mappings(config["tunnels"]["ports"])
         self.log_level=config["logging"].get("level","info")
         self.log_file=config["logging"].get("file","/var/log/ghostwire-server.log")
-        self.ping_timeout=config["server"].get("ping_timeout",60)
+        self.ping_timeout=config["server"].get("ping_timeout",10)
         self.auto_update=config["server"].get("auto_update",True)
         self.update_check_interval=config["server"].get("update_check_interval",300)
         self.update_check_on_startup=config["server"].get("update_check_on_startup",True)
