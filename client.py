@@ -32,32 +32,93 @@ class GhostWireClient:
         self.running=False
         self.reconnect_delay=config.initial_delay
         self.send_queue=None
+        self.control_queue=None
         self.shutdown_event=asyncio.Event()
         self.last_ping_time=0
         self.last_pong_time=0
         self.ping_interval=10
         self.ping_timeout=60
-        self.data_tasks=set()
-        self.data_tasks_by_conn={}
+        self.conn_write_queues={}
+        self.conn_write_tasks={}
+        self.connect_tasks=set()
+        self.connect_semaphore=asyncio.Semaphore(256)
+        self.preconnect_buffers={}
         self.updater=Updater("client",check_interval=config.update_check_interval,check_on_startup=config.update_check_on_startup)
 
-    def remove_data_task(self,conn_id,task):
-        self.data_tasks.discard(task)
-        conn_tasks=self.data_tasks_by_conn.get(conn_id)
-        if conn_tasks:
-            conn_tasks.discard(task)
-            if not conn_tasks:
-                self.data_tasks_by_conn.pop(conn_id,None)
+    def clear_conn_writers(self):
+        for conn_id,task in list(self.conn_write_tasks.items()):
+            if not task.done():
+                task.cancel()
+        self.conn_write_tasks.clear()
+        self.conn_write_queues.clear()
+        for task in list(self.connect_tasks):
+            if not task.done():
+                task.cancel()
+        self.connect_tasks.clear()
+        self.preconnect_buffers.clear()
 
-    async def sender_task(self,send_queue,stop_event):
+    def spawn_connect_task(self,conn_id,remote_ip,remote_port):
+        task=asyncio.create_task(self.handle_connect(conn_id,remote_ip,remote_port))
+        self.connect_tasks.add(task)
+        task.add_done_callback(self.connect_tasks.discard)
+
+    async def close_conn_writer(self,conn_id,flush=False):
+        queue=self.conn_write_queues.get(conn_id)
+        task=self.conn_write_tasks.get(conn_id)
+        if not queue or not task:
+            self.conn_write_queues.pop(conn_id,None)
+            self.conn_write_tasks.pop(conn_id,None)
+            return
+        if flush:
+            try:
+                await asyncio.wait_for(queue.join(),timeout=5)
+            except:
+                pass
         try:
-            while not stop_event.is_set() or not send_queue.empty():
+            queue.put_nowait(None)
+        except asyncio.QueueFull:
+            task.cancel()
+        try:
+            await asyncio.wait_for(task,timeout=2)
+        except:
+            task.cancel()
+        self.conn_write_queues.pop(conn_id,None)
+        self.conn_write_tasks.pop(conn_id,None)
+
+    async def conn_writer_loop(self,conn_id,writer,queue):
+        try:
+            while True:
+                payload=await queue.get()
+                if payload is None:
+                    queue.task_done()
+                    break
+                writer.write(payload)
+                await asyncio.wait_for(writer.drain(),timeout=15)
+                queue.task_done()
+        except asyncio.TimeoutError:
+            logger.warning(f"Write timeout for remote connection {conn_id}")
+        except Exception as e:
+            logger.debug(f"Writer loop error for {conn_id}: {e}")
+        finally:
+            self.conn_write_queues.pop(conn_id,None)
+            self.conn_write_tasks.pop(conn_id,None)
+            self.tunnel_manager.remove_connection(conn_id)
+
+    async def sender_task(self,send_queue,control_queue,stop_event):
+        try:
+            while not stop_event.is_set() or not send_queue.empty() or not control_queue.empty():
                 try:
-                    message=await asyncio.wait_for(send_queue.get(),timeout=0.1)
+                    message=control_queue.get_nowait()
+                except asyncio.QueueEmpty:
+                    try:
+                        message=await asyncio.wait_for(send_queue.get(),timeout=0.1)
+                    except asyncio.TimeoutError:
+                        continue
+                try:
+                    if self.websocket:
+                        await self.websocket.send(message)
                 except asyncio.TimeoutError:
                     continue
-                if self.websocket:
-                    await self.websocket.send(message)
         except Exception as e:
             logger.debug(f"Sender task error: {e}")
         finally:
@@ -70,7 +131,7 @@ class GhostWireClient:
                 if best_ip:
                     server_url=self.config.server_url.replace(self.config.cloudflare_host,best_ip)
                     logger.info(f"Using CloudFlare IP: {best_ip}")
-            self.websocket=await websockets.connect(server_url,max_size=None,ping_interval=None,close_timeout=5)
+            self.websocket=await websockets.connect(server_url,max_size=None,max_queue=1024,ping_interval=None,close_timeout=5)
             pubkey_msg=await asyncio.wait_for(self.websocket.recv(),timeout=10)
             if len(pubkey_msg)<9:
                 raise ValueError("Invalid public key message")
@@ -109,18 +170,23 @@ class GhostWireClient:
 
     async def handle_connect(self,conn_id,remote_ip,remote_port):
         try:
-            logger.info(f"CONNECT request: {conn_id} -> {remote_ip}:{remote_port}")
-            reader,writer=await asyncio.wait_for(asyncio.open_connection(remote_ip,remote_port),timeout=10)
+            async with self.connect_semaphore:
+                logger.info(f"CONNECT request: {conn_id} -> {remote_ip}:{remote_port}")
+                reader,writer=await asyncio.wait_for(asyncio.open_connection(remote_ip,remote_port),timeout=10)
             self.tunnel_manager.add_connection(conn_id,(reader,writer))
+            buffered=self.preconnect_buffers.pop(conn_id,[])
+            for payload in buffered:
+                await self.handle_data(conn_id,payload)
             asyncio.create_task(self.forward_remote_to_websocket(conn_id,reader))
         except Exception as e:
             logger.error(f"Failed to connect to {remote_ip}:{remote_port}: {e}")
+            self.preconnect_buffers.pop(conn_id,None)
             error_msg=pack_error(conn_id,str(e),self.key)
             try:
-                if self.send_queue:
-                    self.send_queue.put_nowait(error_msg)
+                if self.control_queue:
+                    self.control_queue.put_nowait(error_msg)
             except (asyncio.QueueFull,AttributeError):
-                logger.warning(f"Send queue unavailable, dropping error message")
+                logger.warning(f"Control queue unavailable, dropping error message")
 
     async def forward_remote_to_websocket(self,conn_id,reader):
         try:
@@ -141,8 +207,8 @@ class GhostWireClient:
             logger.debug(f"Forward error for {conn_id}: {e}")
         finally:
             try:
-                if self.send_queue:
-                    self.send_queue.put_nowait(pack_close(conn_id,0,self.key))
+                if self.control_queue:
+                    self.control_queue.put_nowait(pack_close(conn_id,0,self.key))
             except:
                 pass
             self.tunnel_manager.remove_connection(conn_id)
@@ -161,17 +227,12 @@ class GhostWireClient:
                         break
                     if msg_type==MSG_CONNECT:
                         remote_ip,remote_port=unpack_connect(payload)
-                        await self.handle_connect(conn_id,remote_ip,remote_port)
+                        self.spawn_connect_task(conn_id,remote_ip,remote_port)
                     elif msg_type==MSG_DATA:
-                        task=asyncio.create_task(self.handle_data(conn_id,payload))
-                        self.data_tasks.add(task)
-                        conn_tasks=self.data_tasks_by_conn.setdefault(conn_id,set())
-                        conn_tasks.add(task)
-                        task.add_done_callback(lambda t,cid=conn_id:self.remove_data_task(cid,t))
+                        await self.handle_data(conn_id,payload)
                     elif msg_type==MSG_CLOSE:
-                        pending=self.data_tasks_by_conn.get(conn_id)
-                        if pending:
-                            await asyncio.gather(*list(pending),return_exceptions=True)
+                        self.preconnect_buffers.pop(conn_id,None)
+                        await self.close_conn_writer(conn_id,flush=True)
                         self.tunnel_manager.remove_connection(conn_id)
                     elif msg_type==MSG_ERROR:
                         logger.error(f"Server error for {conn_id}: {payload.decode()}")
@@ -180,8 +241,8 @@ class GhostWireClient:
                         timestamp=struct.unpack("!Q",payload)[0]
                         self.last_pong_time=time.time()
                         try:
-                            if self.send_queue:
-                                self.send_queue.put_nowait(pack_pong(timestamp,self.key))
+                            if self.control_queue:
+                                self.control_queue.put_nowait(pack_pong(timestamp,self.key))
                         except (asyncio.QueueFull,AttributeError):
                             pass
                     elif msg_type==MSG_PONG:
@@ -193,18 +254,25 @@ class GhostWireClient:
 
     async def handle_data(self,conn_id,payload):
         connection=self.tunnel_manager.get_connection(conn_id)
+        if not connection:
+            buffer=self.preconnect_buffers.setdefault(conn_id,[])
+            if len(buffer)<128:
+                buffer.append(payload)
+            else:
+                logger.warning(f"Preconnect buffer full for remote connection {conn_id}")
+            return
         if connection:
-            reader,writer=connection
+            _,writer=connection
             try:
-                lock=self.tunnel_manager.get_connection_lock(conn_id)
-                if not lock:
-                    return
-                async with lock:
-                    writer.write(payload)
-                    await asyncio.wait_for(writer.drain(),timeout=5)
-            except asyncio.TimeoutError:
-                logger.warning(f"Write timeout for remote connection {conn_id}")
-                self.tunnel_manager.remove_connection(conn_id)
+                queue=self.conn_write_queues.get(conn_id)
+                if not queue:
+                    queue=asyncio.Queue(maxsize=1024)
+                    self.conn_write_queues[conn_id]=queue
+                    self.conn_write_tasks[conn_id]=asyncio.create_task(self.conn_writer_loop(conn_id,writer,queue))
+                queue.put_nowait(payload)
+            except asyncio.QueueFull:
+                logger.warning(f"Write queue full for remote connection {conn_id}")
+                await self.close_conn_writer(conn_id,flush=False)
             except Exception as e:
                 logger.error(f"Error writing to remote connection {conn_id}: {e}")
                 self.tunnel_manager.remove_connection(conn_id)
@@ -213,12 +281,12 @@ class GhostWireClient:
         while self.running:
             try:
                 await asyncio.sleep(self.ping_interval)
-                if self.websocket and self.send_queue:
+                if self.websocket and self.control_queue:
                     timestamp=int(time.time()*1000)
                     try:
-                        self.send_queue.put_nowait(pack_ping(timestamp,self.key))
+                        self.control_queue.put_nowait(pack_ping(timestamp,self.key))
                     except (asyncio.QueueFull,AttributeError):
-                        logger.warning(f"Send queue unavailable, skipping ping")
+                        logger.warning(f"Control queue unavailable, skipping ping")
             except Exception as e:
                 logger.debug(f"Ping error: {e}")
                 break
@@ -241,10 +309,12 @@ class GhostWireClient:
         while self.running and not self.shutdown_event.is_set():
             if await self.connect():
                 send_queue=asyncio.Queue(maxsize=8192)
+                control_queue=asyncio.Queue(maxsize=2048)
                 stop_event=asyncio.Event()
                 self.send_queue=send_queue
+                self.control_queue=control_queue
                 try:
-                    sender_task=asyncio.create_task(self.sender_task(send_queue,stop_event))
+                    sender_task=asyncio.create_task(self.sender_task(send_queue,control_queue,stop_event))
                     ping_task=asyncio.create_task(self.ping_loop())
                     timeout_monitor=asyncio.create_task(self.ping_timeout_monitor())
                     receive_task=asyncio.create_task(self.receive_messages())
@@ -271,17 +341,14 @@ class GhostWireClient:
                 except Exception as e:
                     logger.error(f"Runtime error: {e}")
                 finally:
-                    if self.data_tasks:
-                        for task in list(self.data_tasks):
-                            task.cancel()
-                        self.data_tasks.clear()
-                    self.data_tasks_by_conn.clear()
+                    self.clear_conn_writers()
                     if self.websocket:
                         try:
                             await asyncio.wait_for(self.websocket.close(),timeout=2)
                         except:
                             pass
                     self.send_queue=None
+                    self.control_queue=None
                     self.tunnel_manager.close_all()
             if self.running and not self.shutdown_event.is_set():
                 logger.info(f"Reconnecting in {self.reconnect_delay} seconds...")

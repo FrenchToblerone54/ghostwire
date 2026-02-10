@@ -128,8 +128,9 @@ threads=4"
 [server]
 listen_host="${WS_HOST}"
 listen_port=${WS_PORT}
+listen_backlog=4096
 websocket_path="/ws"
-ping_timeout=10
+ping_timeout=60
 auto_update=${AUTO_UPDATE}
 update_check_interval=300
 update_check_on_startup=true

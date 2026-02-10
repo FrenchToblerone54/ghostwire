@@ -118,8 +118,9 @@ ports=[
 [server]
 listen_host="0.0.0.0"
 listen_port=8443
+listen_backlog=4096        # TCP listen queue depth
 websocket_path="/ws"
-ping_timeout=10
+ping_timeout=60            # Connection timeout (seconds)
 auto_update=true
 update_check_interval=300
 update_check_on_startup=true
@@ -135,7 +136,7 @@ enabled=true
 host="127.0.0.1"
 port=9090
 path="aBcDeFgHiJkLmNoPqRsT"
-threads=4
+threads=4                  # HTTP server worker threads
 
 [logging]
 level="info"
