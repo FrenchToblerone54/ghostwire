@@ -131,12 +131,12 @@ class GhostWireClient:
                         break
                     if p is None:
                         queue.task_done()
-                        await asyncio.wait_for(writer.drain(),timeout=60)
+                        await asyncio.wait_for(writer.drain(),timeout=120)
                         return
                     writer.write(p)
                     written+=len(p)
                     queue.task_done()
-                await asyncio.wait_for(writer.drain(),timeout=60)
+                await asyncio.wait_for(writer.drain(),timeout=120)
         except asyncio.TimeoutError:
             logger.warning(f"Write timeout for remote connection {conn_id}")
         except Exception as e:
@@ -385,7 +385,7 @@ class GhostWireClient:
                     send_queue.put_nowait(message)
                 except asyncio.QueueFull:
                     try:
-                        await asyncio.wait_for(send_queue.put(message),timeout=5)
+                        await asyncio.wait_for(send_queue.put(message),timeout=30)
                     except asyncio.TimeoutError:
                         logger.warning(f"Send queue stalled for {conn_id}, closing connection")
                         break
