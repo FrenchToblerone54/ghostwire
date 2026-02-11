@@ -2,6 +2,7 @@
 import asyncio
 import logging
 import signal
+import socket
 import sys
 import time
 import struct
@@ -46,7 +47,7 @@ class GhostWireClient:
         self.conn_write_queues={}
         self.conn_write_tasks={}
         self.connect_tasks=set()
-        self.connect_semaphore=asyncio.Semaphore(256)
+        self.connect_semaphore=asyncio.Semaphore(1024)
         self.preconnect_buffers={}
         self.connected_server_url=""
         self.child_channels={}
@@ -124,19 +125,19 @@ class GhostWireClient:
                 writer.write(payload)
                 written=len(payload)
                 queue.task_done()
-                while written<1048576:
+                while written<262144:
                     try:
                         p=queue.get_nowait()
                     except asyncio.QueueEmpty:
                         break
                     if p is None:
                         queue.task_done()
-                        await asyncio.wait_for(writer.drain(),timeout=120)
+                        await asyncio.wait_for(writer.drain(),timeout=15)
                         return
                     writer.write(p)
                     written+=len(p)
                     queue.task_done()
-                await asyncio.wait_for(writer.drain(),timeout=120)
+                await asyncio.wait_for(writer.drain(),timeout=15)
         except asyncio.CancelledError:
             logger.debug(f"Writer task canceled for {conn_id}")
         except asyncio.TimeoutError:
@@ -163,21 +164,12 @@ class GhostWireClient:
                     except asyncio.QueueEmpty:
                         break
                 if not batch:
-                    try:
-                        batch.extend(await asyncio.wait_for(send_queue.get(),timeout=0.05))
-                        while len(batch)<1048576:
-                            try:
-                                batch.extend(send_queue.get_nowait())
-                            except asyncio.QueueEmpty:
-                                break
-                    except asyncio.TimeoutError:
-                        for _ in range(64):
-                            try:
-                                batch.extend(control_queue.get_nowait())
-                            except asyncio.QueueEmpty:
-                                break
-                        if not batch:
-                            continue
+                    batch.extend(await send_queue.get())
+                    while len(batch)<1048576:
+                        try:
+                            batch.extend(send_queue.get_nowait())
+                        except asyncio.QueueEmpty:
+                            break
                 await websocket.send(bytes(batch))
         except Exception as e:
             logger.debug(f"Sender task error: {e}")
@@ -355,6 +347,9 @@ class GhostWireClient:
                 channel_id=self.conn_channel_map.get(conn_id,"main")
                 logger.debug(f"CONNECT request: {conn_id} -> {remote_ip}:{remote_port} via {channel_id}")
                 reader,writer=await asyncio.wait_for(asyncio.open_connection(remote_ip,remote_port),timeout=10)
+            sock=writer.get_extra_info("socket")
+            if sock:
+                sock.setsockopt(socket.IPPROTO_TCP,socket.TCP_NODELAY,1)
             self.tunnel_manager.add_connection(conn_id,(reader,writer))
             buffered=self.preconnect_buffers.pop(conn_id,[])
             for payload in buffered:
@@ -373,7 +368,7 @@ class GhostWireClient:
     async def forward_remote_to_websocket(self,conn_id,reader):
         try:
             while True:
-                data=await reader.read(262144)
+                data=await reader.read(65536)
                 if not data:
                     break
                 channel_id=self.conn_channel_map.get(conn_id,"main")
@@ -387,7 +382,7 @@ class GhostWireClient:
                     send_queue.put_nowait(message)
                 except asyncio.QueueFull:
                     try:
-                        await asyncio.wait_for(send_queue.put(message),timeout=30)
+                        await asyncio.wait_for(send_queue.put(message),timeout=15)
                     except asyncio.TimeoutError:
                         logger.warning(f"Send queue stalled for {conn_id}, closing connection")
                         break
@@ -487,7 +482,7 @@ class GhostWireClient:
         connection=self.tunnel_manager.get_connection(conn_id)
         if not connection:
             buffer=self.preconnect_buffers.setdefault(conn_id,[])
-            if len(buffer)<128:
+            if len(buffer)<16:
                 buffer.append(payload)
             else:
                 logger.warning(f"Preconnect buffer full for remote connection {conn_id}")

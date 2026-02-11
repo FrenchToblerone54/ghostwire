@@ -2,6 +2,7 @@
 import asyncio
 import logging
 import signal
+import socket
 import sys
 import time
 import struct
@@ -95,19 +96,19 @@ class GhostWireServer:
                 writer.write(payload)
                 written=len(payload)
                 queue.task_done()
-                while written<1048576:
+                while written<262144:
                     try:
                         p=queue.get_nowait()
                     except asyncio.QueueEmpty:
                         break
                     if p is None:
                         queue.task_done()
-                        await asyncio.wait_for(writer.drain(),timeout=120)
+                        await asyncio.wait_for(writer.drain(),timeout=15)
                         return
                     writer.write(p)
                     written+=len(p)
                     queue.task_done()
-                await asyncio.wait_for(writer.drain(),timeout=120)
+                await asyncio.wait_for(writer.drain(),timeout=15)
         except asyncio.CancelledError:
             logger.debug(f"Writer task canceled for {conn_id}")
         except asyncio.TimeoutError:
@@ -134,21 +135,12 @@ class GhostWireServer:
                     except asyncio.QueueEmpty:
                         break
                 if not batch:
-                    try:
-                        batch.extend(await asyncio.wait_for(send_queue.get(),timeout=0.05))
-                        while len(batch)<1048576:
-                            try:
-                                batch.extend(send_queue.get_nowait())
-                            except asyncio.QueueEmpty:
-                                break
-                    except asyncio.TimeoutError:
-                        for _ in range(64):
-                            try:
-                                batch.extend(control_queue.get_nowait())
-                            except asyncio.QueueEmpty:
-                                break
-                        if not batch:
-                            continue
+                    batch.extend(await send_queue.get())
+                    while len(batch)<1048576:
+                        try:
+                            batch.extend(send_queue.get_nowait())
+                        except asyncio.QueueEmpty:
+                            break
                 await websocket.send(bytes(batch))
         except Exception as e:
             logger.debug(f"Sender task error: {e}")
@@ -392,6 +384,9 @@ class GhostWireServer:
 
     async def handle_local_connection(self,reader,writer,remote_ip,remote_port):
         conn_id=self.tunnel_manager.generate_conn_id()
+        sock=writer.get_extra_info("socket")
+        if sock:
+            sock.setsockopt(socket.IPPROTO_TCP,socket.TCP_NODELAY,1)
         self.tunnel_manager.add_connection(conn_id,(reader,writer))
         logger.debug(f"New local connection {conn_id} -> {remote_ip}:{remote_port}")
         try:
@@ -435,7 +430,7 @@ class GhostWireServer:
     async def forward_local_to_websocket(self,conn_id,reader):
         try:
             while True:
-                data=await reader.read(262144)
+                data=await reader.read(65536)
                 if not data:
                     break
                 send_queue=self.send_queue
@@ -454,7 +449,7 @@ class GhostWireServer:
                     send_queue.put_nowait(message)
                 except asyncio.QueueFull:
                     try:
-                        await asyncio.wait_for(send_queue.put(message),timeout=30)
+                        await asyncio.wait_for(send_queue.put(message),timeout=15)
                     except asyncio.TimeoutError:
                         logger.warning(f"Send queue stalled for {conn_id}, closing connection")
                         break
