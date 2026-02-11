@@ -391,11 +391,7 @@ class GhostWireServer:
                         control_queue=channel.get("control_queue")
                         self.conn_channel_map[conn_id]=selected_child
                 else:
-                    logger.warning(f"No child channel available, dropping connection {conn_id}")
-                    self.tunnel_manager.remove_connection(conn_id)
-                    writer.close()
-                    await writer.wait_closed()
-                    return
+                    logger.debug(f"No child channel available for {conn_id}, using main channel")
             if not self.websocket or not send_queue or not control_queue:
                 logger.error(f"No client connected, dropping connection {conn_id}")
                 self.conn_channel_map.pop(conn_id,None)
@@ -430,12 +426,10 @@ class GhostWireServer:
                 mapped_child=None
                 if self.config.ws_pool_enabled:
                     mapped_child=self.conn_channel_map.get(conn_id)
-                    if not mapped_child:
-                        logger.debug(f"No child mapping for {conn_id}, stopping forward")
-                        break
-                    channel=self.child_channels.get(mapped_child)
-                    if channel:
-                        send_queue=channel.get("send_queue")
+                    if mapped_child:
+                        channel=self.child_channels.get(mapped_child)
+                        if channel:
+                            send_queue=channel.get("send_queue")
                 if not self.websocket or not send_queue:
                     logger.debug(f"Client disconnected, stopping forward for {conn_id}")
                     break
