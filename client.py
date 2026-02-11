@@ -134,35 +134,36 @@ class GhostWireClient:
             self.tunnel_manager.remove_connection(conn_id)
 
     async def sender_task(self,websocket,send_queue,control_queue,stop_event):
-        control_quota=16
-        control_count=0
         try:
             while not stop_event.is_set() or not send_queue.empty() or not control_queue.empty():
-                message=None
-                if control_count<control_quota:
+                batch=bytearray()
+                for _ in range(64):
                     try:
-                        message=control_queue.get_nowait()
-                        control_count+=1
+                        batch.extend(control_queue.get_nowait())
                     except asyncio.QueueEmpty:
-                        pass
-                if message is None:
+                        break
+                while len(batch)<1048576:
                     try:
-                        message=send_queue.get_nowait()
-                        control_count=0
+                        batch.extend(send_queue.get_nowait())
                     except asyncio.QueueEmpty:
-                        try:
-                            message=await asyncio.wait_for(send_queue.get(),timeout=0.05)
-                            control_count=0
-                        except asyncio.TimeoutError:
+                        break
+                if not batch:
+                    try:
+                        batch.extend(await asyncio.wait_for(send_queue.get(),timeout=0.05))
+                        while len(batch)<1048576:
                             try:
-                                message=await asyncio.wait_for(control_queue.get(),timeout=0.05)
-                                control_count=min(control_count+1,control_quota)
-                            except asyncio.TimeoutError:
-                                continue
-                try:
-                    await websocket.send(message)
-                except asyncio.TimeoutError:
-                    continue
+                                batch.extend(send_queue.get_nowait())
+                            except asyncio.QueueEmpty:
+                                break
+                    except asyncio.TimeoutError:
+                        for _ in range(64):
+                            try:
+                                batch.extend(control_queue.get_nowait())
+                            except asyncio.QueueEmpty:
+                                break
+                        if not batch:
+                            continue
+                await websocket.send(bytes(batch))
         except Exception as e:
             logger.debug(f"Sender task error: {e}")
         finally:
@@ -475,14 +476,13 @@ class GhostWireClient:
             try:
                 queue=self.conn_write_queues.get(conn_id)
                 if not queue:
-                    queue=asyncio.Queue(maxsize=2048)
+                    queue=asyncio.Queue(maxsize=8192)
                     self.conn_write_queues[conn_id]=queue
                     self.conn_write_tasks[conn_id]=asyncio.create_task(self.conn_writer_loop(conn_id,writer,queue))
-                try:
-                    await asyncio.wait_for(queue.put(payload),timeout=0.5)
-                except asyncio.TimeoutError:
-                    logger.warning(f"Write queue timeout for remote connection {conn_id}, closing")
-                    await self.close_conn_writer(conn_id,flush=False)
+                queue.put_nowait(payload)
+            except asyncio.QueueFull:
+                logger.warning(f"Write queue full for remote connection {conn_id}")
+                await self.close_conn_writer(conn_id,flush=False)
             except Exception as e:
                 logger.error(f"Error writing to remote connection {conn_id}: {e}")
                 self.tunnel_manager.remove_connection(conn_id)
