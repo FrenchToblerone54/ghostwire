@@ -120,7 +120,10 @@ listen_host="0.0.0.0"
 listen_port=8443
 listen_backlog=4096        # TCP listen queue depth
 websocket_path="/ws"
-ping_timeout=10            # Connection timeout (seconds)
+ping_interval=30           # Application-level ping interval (seconds)
+ping_timeout=60            # Connection timeout (seconds)
+ws_pool_enabled=true       # Enable child channel pooling
+ws_pool_children=16        # Number of child channels (2-32, increase for high concurrency)
 auto_update=true
 update_check_interval=300
 update_check_on_startup=true
@@ -152,6 +155,22 @@ file="/var/log/ghostwire-server.log"
 
 The panel is accessible at `http://127.0.0.1:9090/{path}/` where `path` is a randomly generated nanoid. Access is restricted to localhost by default for security. The `threads` parameter (default: 4) controls the number of worker threads for the panel's HTTP server - increase for high traffic.
 
+**Performance Tuning for High Concurrency:**
+
+For web browsing with hundreds of concurrent connections (typical modern websites load 50-200+ resources):
+
+- **`ws_pool_children`** (default: 2): Number of parallel child channels for handling connections
+  - **2-4 channels**: Low usage (< 50 concurrent connections)
+  - **8-16 channels**: Medium usage (50-200 concurrent connections, typical web browsing)
+  - **16-32 channels**: High usage (> 200 concurrent connections, multiple users)
+  - More channels = better concurrency but higher memory usage
+
+- **`ping_interval`** and **`ping_timeout`**: Critical for CloudFlare stability
+  - **For low latency (< 50ms)**: `ping_interval=10`, `ping_timeout=10`
+  - **For high latency (> 200ms, CloudFlare)**: `ping_interval=30`, `ping_timeout=60`
+  - Aggressive timeouts (< 15s) cause constant reconnections on high-latency WAN links
+  - CloudFlare adds 5-500ms latency and has 100s idle timeout, so 30s ping interval is recommended
+
 ### Client Configuration (`/etc/ghostwire/client.toml`)
 
 **Location:** Uncensored country (Netherlands) - connects TO server, makes internet requests
@@ -160,8 +179,9 @@ The panel is accessible at `http://127.0.0.1:9090/{path}/` where `path` is a ran
 [server]
 url="wss://tunnel.example.com/ws"
 token="V1StGXR8_Z5jdHi6B-my"
-ping_interval=10
-ping_timeout=10
+ping_interval=30           # Application-level ping interval (seconds)
+ping_timeout=60            # Connection timeout (seconds)
+ws_pool_children=16        # Number of child channels (2-32, increase for high concurrency)
 auto_update=true
 update_check_interval=300
 update_check_on_startup=true
