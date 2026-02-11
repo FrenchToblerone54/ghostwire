@@ -122,8 +122,21 @@ class GhostWireClient:
                     queue.task_done()
                     break
                 writer.write(payload)
-                await asyncio.wait_for(writer.drain(),timeout=60)
+                written=len(payload)
                 queue.task_done()
+                while written<1048576:
+                    try:
+                        p=queue.get_nowait()
+                    except asyncio.QueueEmpty:
+                        break
+                    if p is None:
+                        queue.task_done()
+                        await asyncio.wait_for(writer.drain(),timeout=60)
+                        return
+                    writer.write(p)
+                    written+=len(p)
+                    queue.task_done()
+                await asyncio.wait_for(writer.drain(),timeout=60)
         except asyncio.TimeoutError:
             logger.warning(f"Write timeout for remote connection {conn_id}")
         except Exception as e:
@@ -368,19 +381,14 @@ class GhostWireClient:
                     logger.debug(f"Send queue unavailable, stopping forward for {conn_id}")
                     break
                 message=pack_data(conn_id,data,self.key)
-                retry_count=0
-                max_retries=3
-                while self.running and send_queue and retry_count<max_retries:
+                try:
+                    send_queue.put_nowait(message)
+                except asyncio.QueueFull:
                     try:
-                        await asyncio.wait_for(send_queue.put(message),timeout=0.2)
-                        break
+                        await asyncio.wait_for(send_queue.put(message),timeout=5)
                     except asyncio.TimeoutError:
-                        retry_count+=1
-                        if retry_count>=max_retries:
-                            logger.warning(f"Send queue stalled for {conn_id}, closing connection")
-                            break
-                if retry_count>=max_retries:
-                    break
+                        logger.warning(f"Send queue stalled for {conn_id}, closing connection")
+                        break
         except Exception as e:
             logger.debug(f"Forward error for {conn_id}: {e}")
         finally:
@@ -396,17 +404,17 @@ class GhostWireClient:
             self.tunnel_manager.remove_connection(conn_id)
 
     async def receive_messages(self,websocket,channel_id):
-        buffer=b""
+        buffer=bytearray()
         try:
             async for message in websocket:
                 if channel_id=="main":
                     self.last_ping_time=time.time()
                     self.last_rx_time=time.time()
-                buffer+=message
+                buffer.extend(message)
                 while len(buffer)>=9:
                     try:
                         msg_type,conn_id,payload,consumed=unpack_message(buffer,self.key)
-                        buffer=buffer[consumed:]
+                        del buffer[:consumed]
                     except ValueError:
                         break
                     if msg_type==MSG_CONNECT:
@@ -419,8 +427,19 @@ class GhostWireClient:
                     elif msg_type==MSG_CLOSE:
                         self.conn_channel_map.pop(conn_id,None)
                         self.preconnect_buffers.pop(conn_id,None)
-                        await self.close_conn_writer(conn_id,flush=True)
-                        self.tunnel_manager.remove_connection(conn_id)
+                        queue=self.conn_write_queues.get(conn_id)
+                        if queue:
+                            try:
+                                queue.put_nowait(None)
+                            except asyncio.QueueFull:
+                                task=self.conn_write_tasks.get(conn_id)
+                                if task:
+                                    task.cancel()
+                                self.conn_write_queues.pop(conn_id,None)
+                                self.conn_write_tasks.pop(conn_id,None)
+                                self.tunnel_manager.remove_connection(conn_id)
+                        else:
+                            self.tunnel_manager.remove_connection(conn_id)
                     elif msg_type==MSG_ERROR:
                         logger.error(f"Server error for {conn_id}: {payload.decode()}")
                         self.conn_channel_map.pop(conn_id,None)

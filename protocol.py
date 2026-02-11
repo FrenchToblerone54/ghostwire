@@ -94,7 +94,7 @@ def unpack_message(data,key):
     msg_type,conn_id,payload_length=unpack_header(header)
     if len(data)<9+payload_length:
         raise ValueError("Incomplete message")
-    payload=data[9:9+payload_length]
+    payload=bytes(data[9:9+payload_length])
     if msg_type==MSG_PUBKEY:
         return msg_type,conn_id,payload,9+payload_length
     if msg_type==MSG_AUTH:
