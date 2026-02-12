@@ -1,13 +1,13 @@
 # GhostWire - Anti-Censorship Reverse Tunnel
 
-GhostWire is a WebSocket-based reverse tunnel system designed to help users in censored countries access the internet freely. It uses HTTP/2 over TLS to appear as normal HTTPS traffic, making it difficult to detect and block.
+GhostWire is a WebSocket-based reverse tunnel system designed to help users in censored countries access the internet freely. It uses secure WebSocket connections over TLS, making it difficult to detect and block.
 
 ## Features
 
 - **RSA-encrypted authentication** - Token invisible to TLS-terminating proxies (CloudFlare-proof)
 - **End-to-end AES-256-GCM encryption** - All tunnel data encrypted with PBKDF2-derived keys
 - **Reverse tunnel architecture** - Client connects TO server (bypasses outbound blocking)
-- **Single persistent WebSocket** - Bidirectional communication over HTTP/2 with TLS
+- **Single persistent WebSocket** - Bidirectional communication over TLS
 - **Flexible TCP port forwarding** - Port ranges, IP binding, custom mappings
 - **Built-in heartbeat** - Transport and application-layer keepalive
 - **CloudFlare compatible** - Works behind TLS-terminating proxies
@@ -116,7 +116,7 @@ ports=[
 
 ```toml
 [server]
-protocol="http2"           # "websocket" or "http2" (use http2 for CloudFlare)
+protocol="websocket"       # "websocket" (default) or "http2" (for DNS-only mode)
 listen_host="0.0.0.0"
 listen_port=8443
 listen_backlog=4096        # TCP listen queue depth
@@ -179,7 +179,7 @@ For web browsing with hundreds of concurrent connections (typical modern website
 
 ```toml
 [server]
-protocol="http2"           # "websocket" or "http2" (use http2 for CloudFlare)
+protocol="websocket"       # "websocket" (default) or "http2" (for DNS-only mode)
 url="wss://tunnel.example.com/ws"  # Works for both protocols
 token="V1StGXR8_Z5jdHi6B-my"
 ping_interval=30           # Application-level ping interval (seconds)

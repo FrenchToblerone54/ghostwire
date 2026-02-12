@@ -126,7 +126,7 @@ threads=4"
 
     cat > /etc/ghostwire/server.toml <<EOF
 [server]
-protocol="http2"
+protocol="websocket"
 listen_host="${WS_HOST}"
 listen_port=${WS_PORT}
 listen_backlog=4096

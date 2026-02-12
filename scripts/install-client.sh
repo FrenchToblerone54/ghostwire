@@ -84,7 +84,7 @@ if [ ! -f /etc/ghostwire/client.toml ]; then
 
     cat > /etc/ghostwire/client.toml <<EOF
 [server]
-protocol="http2"
+protocol="websocket"
 url="${SERVER_URL}"
 token="${TOKEN}"
 ping_interval=30
