@@ -283,7 +283,7 @@ class GhostWireClient:
                     server_url=self.config.server_url.replace(self.config.cloudflare_host,best_ip)
                     logger.info(f"Using CloudFlare IP: {best_ip}")
             self.connected_server_url=server_url
-            self.main_websocket=await websockets.connect(server_url,max_size=None,max_queue=32768,ping_interval=None,compression=None,write_limit=16777216,close_timeout=5)
+            self.main_websocket=await websockets.connect(server_url,max_size=None,max_queue=512,ping_interval=None,compression=None,write_limit=65536,close_timeout=10)
             self.websocket=self.main_websocket
             pubkey_msg=await asyncio.wait_for(self.main_websocket.recv(),timeout=10)
             if len(pubkey_msg)<9:
@@ -323,7 +323,7 @@ class GhostWireClient:
             try:
                 test_url=self.config.server_url.replace(self.config.cloudflare_host,ip)
                 start=time.time()
-                ws=await asyncio.wait_for(websockets.connect(test_url,max_size=None,ping_interval=None,compression=None,write_limit=16777216),timeout=5)
+                ws=await asyncio.wait_for(websockets.connect(test_url,max_size=None,ping_interval=None,compression=None,write_limit=65536),timeout=5)
                 latency=time.time()-start
                 await ws.close()
                 if latency<best_latency:
@@ -336,7 +336,7 @@ class GhostWireClient:
     async def connect_child_channel(self,server_url,slot_id):
         child_id=generate(size=20)
         try:
-            ws=await websockets.connect(server_url,max_size=None,max_queue=32768,ping_interval=None,compression=None,write_limit=16777216,close_timeout=5)
+            ws=await websockets.connect(server_url,max_size=None,max_queue=512,ping_interval=None,compression=None,write_limit=65536,close_timeout=10)
             pubkey_msg=await asyncio.wait_for(ws.recv(),timeout=10)
             if len(pubkey_msg)<9:
                 raise ValueError("Invalid child public key message")
@@ -346,8 +346,8 @@ class GhostWireClient:
             server_public_key=deserialize_public_key(pubkey_bytes)
             auth_msg=pack_auth_message(self.config.token,server_public_key,role="child",child_id=child_id)
             await ws.send(auth_msg)
-            send_queue=asyncio.Queue(maxsize=32768)
-            control_queue=asyncio.Queue(maxsize=16384)
+            send_queue=asyncio.Queue(maxsize=512)
+            control_queue=asyncio.Queue(maxsize=256)
             stop_event=asyncio.Event()
             self.child_channels[child_id]={"ws":ws,"send_queue":send_queue,"control_queue":control_queue,"slot_id":slot_id}
             self.channel_stop_events[child_id]=stop_event
@@ -510,7 +510,7 @@ class GhostWireClient:
             try:
                 queue=self.conn_write_queues.get(conn_id)
                 if not queue:
-                    queue=asyncio.Queue(maxsize=8192)
+                    queue=asyncio.Queue(maxsize=512)
                     self.conn_write_queues[conn_id]=queue
                     self.conn_write_tasks[conn_id]=asyncio.create_task(self.conn_writer_loop(conn_id,writer,queue))
                 queue.put_nowait(payload)
@@ -562,8 +562,8 @@ class GhostWireClient:
             update_task=asyncio.create_task(self.updater.update_loop(self.shutdown_event))
         while self.running and not self.shutdown_event.is_set():
             if await self.connect():
-                send_queue=asyncio.Queue(maxsize=32768)
-                control_queue=asyncio.Queue(maxsize=16384)
+                send_queue=asyncio.Queue(maxsize=512)
+                control_queue=asyncio.Queue(maxsize=256)
                 stop_event=asyncio.Event()
                 self.send_queue=send_queue
                 self.control_queue=control_queue

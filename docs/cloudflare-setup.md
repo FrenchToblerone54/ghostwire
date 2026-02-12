@@ -38,13 +38,26 @@ CloudFlare integration provides additional obfuscation and helps bypass DNS-base
    - Minimum TLS Version: TLS 1.2
    - Automatic HTTPS Rewrites: On
 
-### Step 4: Network Settings
+### Step 4: Network Settings (CRITICAL!)
 
 1. Go to Network
-2. Enable **WebSockets**
+2. Enable **WebSockets** ← THIS IS OFF BY DEFAULT AND WILL CAUSE DISCONNECTIONS!
 3. HTTP/2: Enabled (default)
 
-### Step 5: Origin Rules (Optional)
+### Step 5: Speed Settings (CRITICAL!)
+
+**Turn OFF these features that break WebSockets:**
+
+1. Go to Speed → Optimization
+2. **Rocket Loader**: OFF
+3. **Auto Minify** → HTML: OFF
+4. **Auto Minify** → CSS: OFF
+5. **Auto Minify** → JavaScript: OFF
+6. **Early Hints**: OFF
+
+These optimizations are designed for HTTP, not WebSockets, and will cause disconnections.
+
+### Step 6: Origin Rules (Optional)
 
 If you want additional security:
 

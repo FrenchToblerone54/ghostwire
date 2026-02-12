@@ -264,12 +264,30 @@ Without these timeouts, NPM will drop the persistent WebSocket connection after 
 
 ### CloudFlare
 
-1. Enable **WebSockets** in CloudFlare Dashboard → Network
-2. Set SSL/TLS mode to **Full (Strict)** if using Let's Encrypt on your server
-3. CloudFlare's free tier has a 100-second idle timeout and a **30-minute hard connection limit** — set `enabled=true` in the client's `[cloudflare]` section to enable proactive reconnect before the limit (`max_connection_time=1740` by default = 29 minutes)
-4. With `enabled=true` and empty `ips`/`host`, the IP selection is skipped but the proactive reconnect still applies
+**CRITICAL: Required CloudFlare Dashboard Settings**
 
-**If experiencing authentication timeouts behind CloudFlare:** This is caused by CloudFlare's edge adding latency to the initial WebSocket handshake. GhostWire allows 30 seconds for authentication which should be sufficient.
+1. **Network → WebSockets**: MUST be enabled (OFF by default - will cause disconnections!)
+2. **SSL/TLS → Overview**: Set to **Full (Strict)** (not "Flexible")
+3. **Speed → Rocket Loader**: Turn OFF (breaks WebSocket connections)
+4. **Speed → Auto Minify**: Disable all (HTML, CSS, JS)
+5. **Speed → Early Hints**: Turn OFF
+
+**Client Configuration for CloudFlare:**
+
+CloudFlare's free tier has a 100-second idle timeout and a **30-minute hard connection limit**. Enable proactive reconnect:
+
+```toml
+[cloudflare]
+enabled=true
+max_connection_time=1740  # 29 minutes - reconnect before 30min limit
+```
+
+With `enabled=true` and empty `ips`/`host`, the IP selection is skipped but the proactive reconnect still applies.
+
+**Performance Notes:**
+- GhostWire v0.9.3+ is optimized for CloudFlare with 64KB buffers (reduced from 16MB)
+- Application-level ping (30s) replaces WebSocket ping for CloudFlare reliability
+- CloudFlare adds 5-500ms latency - this is normal and handled by the implementation
 
 ## systemd Management
 

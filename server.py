@@ -250,8 +250,8 @@ class GhostWireServer:
         child_id=""
         sender=None
         ping_monitor=None
-        send_queue=asyncio.Queue(maxsize=32768)
-        control_queue=asyncio.Queue(maxsize=16384)
+        send_queue=asyncio.Queue(maxsize=512)
+        control_queue=asyncio.Queue(maxsize=256)
         stop_event=asyncio.Event()
         self.last_ping_time=time.time()
         try:
@@ -498,7 +498,7 @@ class GhostWireServer:
             try:
                 queue=self.conn_write_queues.get(conn_id)
                 if not queue:
-                    queue=asyncio.Queue(maxsize=8192)
+                    queue=asyncio.Queue(maxsize=512)
                     self.conn_write_queues[conn_id]=queue
                     self.conn_write_tasks[conn_id]=asyncio.create_task(self.conn_writer_loop(conn_id,writer,queue))
                 queue.put_nowait(payload)
@@ -535,7 +535,7 @@ class GhostWireServer:
         update_task=None
         if self.config.auto_update:
             update_task=asyncio.create_task(self.updater.update_loop(self.shutdown_event))
-        async with websockets.serve(self.handle_client,self.config.listen_host,self.config.listen_port,max_size=None,max_queue=32768,ping_interval=None,compression=None,write_limit=16777216,process_request=self.process_request):
+        async with websockets.serve(self.handle_client,self.config.listen_host,self.config.listen_port,max_size=None,max_queue=512,ping_interval=None,compression=None,write_limit=65536,close_timeout=10,process_request=self.process_request):
             await self.shutdown_event.wait()
         if update_task:
             update_task.cancel()
