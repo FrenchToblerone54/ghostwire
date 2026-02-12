@@ -1,6 +1,7 @@
 import struct
 import os
 import hashlib
+from functools import lru_cache
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 from cryptography.hazmat.primitives import hashes,serialization
@@ -17,6 +18,10 @@ MSG_ERROR=0x07
 MSG_INFO=0x08
 MSG_CHILD_CFG=0x09
 MSG_SESSION_KEY=0x0A
+
+@lru_cache(maxsize=64)
+def get_aesgcm(key):
+    return AESGCM(key)
 
 def generate_rsa_keypair():
     private_key=rsa.generate_private_key(public_exponent=65537,key_size=2048)
@@ -41,14 +46,14 @@ def derive_key(token):
 
 def encrypt_payload(key,plaintext,header):
     nonce=os.urandom(12)
-    aesgcm=AESGCM(key)
+    aesgcm=get_aesgcm(key)
     ciphertext=aesgcm.encrypt(nonce,plaintext,header)
     return nonce+ciphertext
 
 def decrypt_payload(key,encrypted_payload,header):
     nonce=encrypted_payload[:12]
     ciphertext=encrypted_payload[12:]
-    aesgcm=AESGCM(key)
+    aesgcm=get_aesgcm(key)
     return aesgcm.decrypt(nonce,ciphertext,header)
 
 def pack_header(msg_type,conn_id,payload_length):

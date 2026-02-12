@@ -51,6 +51,11 @@ class GhostWireServer:
         self.conn_channel_map={}
         self.child_rr_index=0
         self.child_queue_sizes={}
+        self.io_chunk_size=262144
+        self.writer_batch_bytes=1048576
+        self.ws_send_batch_bytes=4194304
+        self.ws_write_limit=4194304
+        self.ws_max_queue=2048
         logger.info("Generating RSA key pair for secure authentication...")
         self.private_key,self.public_key=generate_rsa_keypair()
         self.updater=Updater("server",check_interval=config.update_check_interval,check_on_startup=config.update_check_on_startup,http_proxy=config.update_http_proxy,https_proxy=config.update_https_proxy)
@@ -95,7 +100,7 @@ class GhostWireServer:
                 writer.write(payload)
                 written=len(payload)
                 queue.task_done()
-                while written<262144:
+                while written<self.writer_batch_bytes:
                     try:
                         p=queue.get_nowait()
                     except asyncio.QueueEmpty:
@@ -128,7 +133,7 @@ class GhostWireServer:
                         batch.extend(control_queue.get_nowait())
                     except asyncio.QueueEmpty:
                         break
-                while len(batch)<1048576:
+                while len(batch)<self.ws_send_batch_bytes:
                     try:
                         batch.extend(send_queue.get_nowait())
                     except asyncio.QueueEmpty:
@@ -148,12 +153,12 @@ class GhostWireServer:
                         batch.extend(control_get.result())
                     if data_get in done:
                         batch.extend(data_get.result())
-                    while len(batch)<1048576:
+                    while len(batch)<self.ws_send_batch_bytes:
                         try:
                             batch.extend(control_queue.get_nowait())
                         except asyncio.QueueEmpty:
                             break
-                    while len(batch)<1048576:
+                    while len(batch)<self.ws_send_batch_bytes:
                         try:
                             batch.extend(send_queue.get_nowait())
                         except asyncio.QueueEmpty:
@@ -445,7 +450,7 @@ class GhostWireServer:
     async def forward_local_to_websocket(self,conn_id,reader):
         try:
             while True:
-                data=await reader.read(65536)
+                data=await reader.read(self.io_chunk_size)
                 if not data:
                     break
                 send_queue=self.send_queue
@@ -542,7 +547,7 @@ class GhostWireServer:
             from grpc_transport import start_grpc_server
             await start_grpc_server(self)
         else:
-            async with websockets.serve(self.handle_client,self.config.listen_host,self.config.listen_port,max_size=None,max_queue=512,ping_interval=None,compression=None,write_limit=65536,close_timeout=10,process_request=self.process_request):
+            async with websockets.serve(self.handle_client,self.config.listen_host,self.config.listen_port,max_size=None,max_queue=self.ws_max_queue,ping_interval=None,compression=None,write_limit=self.ws_write_limit,close_timeout=10,process_request=self.process_request):
                 await self.shutdown_event.wait()
         if update_task:
             update_task.cancel()

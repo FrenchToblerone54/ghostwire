@@ -58,6 +58,11 @@ class GhostWireClient:
         self.channel_stop_events={}
         self.child_worker_tasks={}
         self.desired_child_count=0
+        self.io_chunk_size=262144
+        self.writer_batch_bytes=1048576
+        self.ws_send_batch_bytes=4194304
+        self.ws_write_limit=4194304
+        self.ws_max_queue=2048
         self.updater=Updater("client",check_interval=config.update_check_interval,check_on_startup=config.update_check_on_startup,http_proxy=config.update_http_proxy,https_proxy=config.update_https_proxy)
 
     def clear_conn_writers(self):
@@ -126,7 +131,7 @@ class GhostWireClient:
                 writer.write(payload)
                 written=len(payload)
                 queue.task_done()
-                while written<262144:
+                while written<self.writer_batch_bytes:
                     try:
                         p=queue.get_nowait()
                     except asyncio.QueueEmpty:
@@ -159,7 +164,7 @@ class GhostWireClient:
                         batch.extend(control_queue.get_nowait())
                     except asyncio.QueueEmpty:
                         break
-                while len(batch)<1048576:
+                while len(batch)<self.ws_send_batch_bytes:
                     try:
                         batch.extend(send_queue.get_nowait())
                     except asyncio.QueueEmpty:
@@ -179,12 +184,12 @@ class GhostWireClient:
                         batch.extend(control_get.result())
                     if data_get in done:
                         batch.extend(data_get.result())
-                    while len(batch)<1048576:
+                    while len(batch)<self.ws_send_batch_bytes:
                         try:
                             batch.extend(control_queue.get_nowait())
                         except asyncio.QueueEmpty:
                             break
-                    while len(batch)<1048576:
+                    while len(batch)<self.ws_send_batch_bytes:
                         try:
                             batch.extend(send_queue.get_nowait())
                         except asyncio.QueueEmpty:
@@ -480,7 +485,7 @@ class GhostWireClient:
                 self.reconnect_delay=self.config.initial_delay
                 return True
             else:
-                self.main_websocket=await websockets.connect(server_url,max_size=None,max_queue=512,ping_interval=None,compression=None,write_limit=65536,close_timeout=10)
+                self.main_websocket=await websockets.connect(server_url,max_size=None,max_queue=self.ws_max_queue,ping_interval=None,compression=None,write_limit=self.ws_write_limit,close_timeout=10)
                 self.websocket=self.main_websocket
                 pubkey_msg=await asyncio.wait_for(self.main_websocket.recv(),timeout=10)
                 if len(pubkey_msg)<9:
@@ -520,7 +525,7 @@ class GhostWireClient:
             try:
                 test_url=self.config.server_url.replace(self.config.cloudflare_host,ip)
                 start=time.time()
-                ws=await asyncio.wait_for(websockets.connect(test_url,max_size=None,ping_interval=None,compression=None,write_limit=65536),timeout=5)
+                ws=await asyncio.wait_for(websockets.connect(test_url,max_size=None,ping_interval=None,compression=None,write_limit=self.ws_write_limit),timeout=5)
                 latency=time.time()-start
                 await ws.close()
                 if latency<best_latency:
@@ -533,7 +538,7 @@ class GhostWireClient:
     async def connect_child_channel(self,server_url,slot_id):
         child_id=generate(size=20)
         try:
-            ws=await websockets.connect(server_url,max_size=None,max_queue=512,ping_interval=None,compression=None,write_limit=65536,close_timeout=10)
+            ws=await websockets.connect(server_url,max_size=None,max_queue=self.ws_max_queue,ping_interval=None,compression=None,write_limit=self.ws_write_limit,close_timeout=10)
             pubkey_msg=await asyncio.wait_for(ws.recv(),timeout=10)
             if len(pubkey_msg)<9:
                 raise ValueError("Invalid child public key message")
@@ -580,7 +585,7 @@ class GhostWireClient:
     async def forward_remote_to_websocket(self,conn_id,reader):
         try:
             while True:
-                data=await reader.read(65536)
+                data=await reader.read(self.io_chunk_size)
                 if not data:
                     break
                 channel_id=self.conn_channel_map.get(conn_id,"main")
