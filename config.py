@@ -63,7 +63,7 @@ def parse_port_mappings(port_specs):
 class ServerConfig:
     def __init__(self,config_path):
         config=load_toml(config_path)
-        self.protocol=config["server"].get("protocol","http2")
+        self.protocol=config["server"].get("protocol","websocket")
         self.listen_host=config["server"].get("listen_host","0.0.0.0")
         self.listen_port=config["server"].get("listen_port",8443)
         self.listen_backlog=config["server"].get("listen_backlog",4096)
@@ -91,7 +91,7 @@ class ServerConfig:
 class ClientConfig:
     def __init__(self,config_path):
         config=load_toml(config_path)
-        self.protocol=config["server"].get("protocol","http2")
+        self.protocol=config["server"].get("protocol","websocket")
         self.server_url=config["server"]["url"]
         self.token=config["server"]["token"]
         self.ping_interval=config["server"].get("ping_interval",10)
