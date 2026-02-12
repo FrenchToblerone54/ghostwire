@@ -85,6 +85,8 @@ class ServerConfig:
         self.panel_port=config.get("panel",{}).get("port",9090)
         self.panel_path=config.get("panel",{}).get("path","")
         self.panel_threads=config.get("panel",{}).get("threads",4)
+        self.ssl_cert=config["server"].get("ssl_cert","")
+        self.ssl_key=config["server"].get("ssl_key","")
 
 class ClientConfig:
     def __init__(self,config_path):

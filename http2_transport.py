@@ -221,9 +221,16 @@ class HTTP2ServerHandler:
 
 async def start_http2_server(server_instance):
     handler=HTTP2ServerHandler(server_instance)
-    server=await asyncio.start_server(handler.handle_tunnel,server_instance.config.listen_host,server_instance.config.listen_port,backlog=server_instance.config.listen_backlog)
+    ssl_context=None
+    if hasattr(server_instance.config,'ssl_cert') and hasattr(server_instance.config,'ssl_key'):
+        if server_instance.config.ssl_cert and server_instance.config.ssl_key:
+            ssl_context=ssl.create_default_context(ssl.Purpose.CLIENT_AUTH)
+            ssl_context.load_cert_chain(server_instance.config.ssl_cert,server_instance.config.ssl_key)
+            logger.info(f"SSL enabled with certificate: {server_instance.config.ssl_cert}")
+    server=await asyncio.start_server(handler.handle_tunnel,server_instance.config.listen_host,server_instance.config.listen_port,ssl=ssl_context,backlog=server_instance.config.listen_backlog)
     addr=server.sockets[0].getsockname()
-    logger.info(f"HTTP/2 server listening on {addr[0]}:{addr[1]}")
+    protocol="HTTPS" if ssl_context else "HTTP"
+    logger.info(f"HTTP/2 server listening on {protocol}://{addr[0]}:{addr[1]}")
     async with server:
         await server_instance.shutdown_event.wait()
     logger.info("HTTP/2 server stopped")
