@@ -174,7 +174,7 @@ async def start_http2_server(server_instance):
 
 class HTTP2ClientTransport:
     def __init__(self,server_url,token):
-        self.server_url=server_url.replace("wss://","https://").replace("ws://","http://").replace("/ws","")
+        self.server_url=server_url.replace("wss://","https://").replace("ws://","http://")
         self.token=token
         self.client=None
         self.response=None
@@ -199,7 +199,7 @@ class HTTP2ClientTransport:
                         yield struct.pack("!I",len(msg))+msg
                 async for chunk in send_stream():
                     yield chunk
-            self.response=await self.client.post(f"{self.server_url}/tunnel",content=request_content(),headers={"Content-Type":"application/octet-stream"})
+            self.response=await self.client.post(self.server_url,content=request_content(),headers={"Content-Type":"application/octet-stream"})
             self.receiver_task=asyncio.create_task(self._receiver_loop())
             server_msg_len_data=await self._read_exact(4)
             server_msg_len=struct.unpack("!I",server_msg_len_data)[0]

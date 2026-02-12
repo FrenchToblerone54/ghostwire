@@ -40,13 +40,13 @@ ping_timeout=60
 ```toml
 [server]
 protocol="http2"  # Changed from "websocket"
-url="https://tc2.digikalaservice32.store"  # Remove /ws path!
+url="wss://tc2.digikalaservice32.store/ws"  # Same path as websocket
 token="YOUR_TOKEN"
 ping_interval=30
 ping_timeout=60
 ```
 
-**IMPORTANT:** Remove `/ws` from the URL! HTTP/2 uses `/tunnel` endpoint automatically.
+**Note:** Uses same `/ws` path for both protocols (for consistency).
 
 ## nginx Configuration
 
@@ -70,7 +70,7 @@ server {
     proxy_send_timeout 7d;
     proxy_read_timeout 7d;
 
-    location /tunnel {
+    location /ws {
         proxy_pass http://127.0.0.1:8443;
         proxy_http_version 1.1;  # Backend uses HTTP/1.1
 

@@ -180,7 +180,7 @@ For web browsing with hundreds of concurrent connections (typical modern website
 ```toml
 [server]
 protocol="http2"           # "websocket" or "http2" (use http2 for CloudFlare)
-url="https://tunnel.example.com"  # Remove /ws for http2, use wss://.../ ws for websocket
+url="wss://tunnel.example.com/ws"  # Works for both protocols
 token="V1StGXR8_Z5jdHi6B-my"
 ping_interval=30           # Application-level ping interval (seconds)
 ping_timeout=60            # Connection timeout (seconds)
