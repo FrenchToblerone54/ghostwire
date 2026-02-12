@@ -134,13 +134,32 @@ class GhostWireServer:
                     except asyncio.QueueEmpty:
                         break
                 if not batch:
-                    batch.extend(await send_queue.get())
+                    control_get=asyncio.create_task(control_queue.get())
+                    data_get=asyncio.create_task(send_queue.get())
+                    stop_get=asyncio.create_task(stop_event.wait())
+                    done,pending=await asyncio.wait({control_get,data_get,stop_get},return_when=asyncio.FIRST_COMPLETED)
+                    for task in pending:
+                        task.cancel()
+                    if pending:
+                        await asyncio.gather(*pending,return_exceptions=True)
+                    if stop_get in done and control_get not in done and data_get not in done:
+                        break
+                    if control_get in done:
+                        batch.extend(control_get.result())
+                    if data_get in done:
+                        batch.extend(data_get.result())
+                    while len(batch)<1048576:
+                        try:
+                            batch.extend(control_queue.get_nowait())
+                        except asyncio.QueueEmpty:
+                            break
                     while len(batch)<1048576:
                         try:
                             batch.extend(send_queue.get_nowait())
                         except asyncio.QueueEmpty:
                             break
-                await websocket.send(bytes(batch))
+                if batch:
+                    await websocket.send(bytes(batch))
         except Exception as e:
             logger.debug(f"Sender task error: {e}")
         finally:
@@ -454,6 +473,7 @@ class GhostWireServer:
         finally:
             try:
                 control_queue=self.control_queue
+                send_queue=self.send_queue
                 if self.config.ws_pool_enabled:
                     mapped_child=self.conn_channel_map.get(conn_id)
                     if mapped_child:
@@ -461,7 +481,10 @@ class GhostWireServer:
                         channel=self.child_channels.get(mapped_child)
                         if channel:
                             control_queue=channel.get("control_queue")
-                if self.websocket and control_queue:
+                            send_queue=channel.get("send_queue")
+                if self.websocket and send_queue:
+                    send_queue.put_nowait(pack_close(conn_id,0,self.key))
+                elif self.websocket and control_queue:
                     control_queue.put_nowait(pack_close(conn_id,0,self.key))
             except:
                 pass
