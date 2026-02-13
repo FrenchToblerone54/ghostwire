@@ -56,7 +56,9 @@ class GhostWireServer:
         self.conn_data_seq_enabled=set()
         self.conn_data_rx_expected={}
         self.conn_data_rx_pending={}
+        self.conn_data_rx_wait_start={}
         self.conn_data_close_seq={}
+        self.seq_timeout=10
         self.io_chunk_size=262144
         self.writer_batch_bytes=1048576
         self.ws_send_batch_bytes=4194304
@@ -213,6 +215,7 @@ class GhostWireServer:
         self.conn_data_seq_enabled.discard(conn_id)
         self.conn_data_rx_expected.pop(conn_id,None)
         self.conn_data_rx_pending.pop(conn_id,None)
+        self.conn_data_rx_wait_start.pop(conn_id,None)
         self.conn_data_close_seq.pop(conn_id,None)
 
     def should_stripe_data(self):
@@ -261,6 +264,7 @@ class GhostWireServer:
         if seq<expected:
             return
         if seq==expected:
+            self.conn_data_rx_wait_start.pop(conn_id,None)
             await self.handle_data(conn_id,payload)
             expected+=1
             pending=self.conn_data_rx_pending.get(conn_id)
@@ -270,12 +274,34 @@ class GhostWireServer:
                 expected+=1
             if pending is not None and not pending:
                 self.conn_data_rx_pending.pop(conn_id,None)
+                self.conn_data_rx_wait_start.pop(conn_id,None)
+            else:
+                if conn_id not in self.conn_data_rx_wait_start:
+                    self.conn_data_rx_wait_start[conn_id]=time.time()
             self.conn_data_rx_expected[conn_id]=expected
             await self.maybe_finalize_close_seq(conn_id)
             return
         pending=self.conn_data_rx_pending.setdefault(conn_id,{})
         if seq not in pending:
             pending[seq]=payload
+            if conn_id not in self.conn_data_rx_wait_start:
+                self.conn_data_rx_wait_start[conn_id]=time.time()
+
+    async def sequence_timeout_monitor(self):
+        while self.running and not self.shutdown_event.is_set():
+            await asyncio.sleep(2)
+            now=time.time()
+            timed_out=[]
+            for conn_id,start_time in list(self.conn_data_rx_wait_start.items()):
+                if now-start_time>self.seq_timeout:
+                    timed_out.append(conn_id)
+            for conn_id in timed_out:
+                expected=self.conn_data_rx_expected.get(conn_id,0)
+                logger.warning(f"Connection {conn_id} timed out waiting for sequence {expected}, closing")
+                self.conn_channel_map.pop(conn_id,None)
+                self.clear_conn_data_state(conn_id)
+                await self.close_conn_writer(conn_id,flush=False)
+                self.tunnel_manager.remove_connection(conn_id)
 
     async def close_child_channels(self):
         for child_id,channel in list(self.child_channels.items()):
@@ -300,13 +326,10 @@ class GhostWireServer:
     async def close_connections_for_child(self,child_id):
         affected=[conn_id for conn_id,mapped_child in self.conn_channel_map.items() if mapped_child==child_id]
         if self.conn_data_seq_enabled:
-            striped_conn_ids=list(self.conn_data_seq_enabled)
-            logger.warning(f"Child {child_id} lost during striped mode, closing {len(striped_conn_ids)} striped connections to avoid sequence gaps")
-            for conn_id in striped_conn_ids:
+            striped_count=len(self.conn_data_seq_enabled)
+            logger.info(f"Child {child_id} lost during striped mode, {striped_count} striped connections will timeout if sequences are missing")
+            for conn_id in affected:
                 self.conn_channel_map.pop(conn_id,None)
-                self.clear_conn_data_state(conn_id)
-                await self.close_conn_writer(conn_id,flush=False)
-                self.tunnel_manager.remove_connection(conn_id)
             return
         alternative_children=self.get_available_child_ids()
         if not alternative_children:
@@ -355,6 +378,7 @@ class GhostWireServer:
         child_id=""
         sender=None
         ping_monitor=None
+        seq_monitor=None
         send_queue=asyncio.Queue(maxsize=512)
         control_queue=asyncio.Queue(maxsize=256)
         stop_event=asyncio.Event()
@@ -429,6 +453,7 @@ class GhostWireServer:
                     self.main_send_queue=send_queue
                     self.main_control_queue=control_queue
                     ping_monitor=asyncio.create_task(self.ping_monitor_loop())
+                    seq_monitor=asyncio.create_task(self.sequence_timeout_monitor())
                     if self.config.ws_pool_enabled:
                         try:
                             control_queue.put_nowait(pack_child_cfg(self.config.ws_pool_children,self.key))
@@ -473,6 +498,8 @@ class GhostWireServer:
                     sender.cancel()
             if ping_monitor:
                 ping_monitor.cancel()
+            if seq_monitor:
+                seq_monitor.cancel()
             if authenticated:
                 if role=="main":
                     await self.close_child_channels()
