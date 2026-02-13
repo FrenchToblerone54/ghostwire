@@ -762,22 +762,19 @@ class GhostWireClient:
             logger.error(f"Receive error channel={channel_id}: {e}",exc_info=True)
         finally:
             if channel_id!="main":
-                affected=[conn_id for conn_id,mapped_channel in self.conn_channel_map.items() if mapped_channel==channel_id]
-                available_children=[cid for cid,ch in self.child_channels.items() if cid!=channel_id and ch.get("ws") and getattr(ch.get("ws"),"close_code",None) is None]
                 if self.conn_data_seq_enabled:
-                    striped_count=len(self.conn_data_seq_enabled)
-                    logger.info(f"Child {channel_id} lost during striped mode, {striped_count} striped connections will continue with remaining {len(available_children)} children")
-                    for conn_id in affected:
-                        if conn_id not in self.conn_data_seq_enabled:
-                            self.conn_channel_map.pop(conn_id,None)
-                            self.preconnect_buffers.pop(conn_id,None)
-                            self.clear_conn_data_state(conn_id)
-                            await self.close_conn_writer(conn_id,flush=False)
-                            self.tunnel_manager.remove_connection(conn_id)
-                        else:
-                            self.conn_channel_map.pop(conn_id,None)
+                    striped_conn_ids=list(self.conn_data_seq_enabled)
+                    logger.warning(f"Child {channel_id} lost during striped mode, closing {len(striped_conn_ids)} striped connections to avoid sequence gaps")
+                    for conn_id in striped_conn_ids:
+                        self.conn_channel_map.pop(conn_id,None)
+                        self.preconnect_buffers.pop(conn_id,None)
+                        self.clear_conn_data_state(conn_id)
+                        await self.close_conn_writer(conn_id,flush=False)
+                        self.tunnel_manager.remove_connection(conn_id)
                     await self.close_channel(channel_id)
                     return
+                affected=[conn_id for conn_id,mapped_channel in self.conn_channel_map.items() if mapped_channel==channel_id]
+                available_children=[cid for cid,ch in self.child_channels.items() if cid!=channel_id and ch.get("ws") and getattr(ch.get("ws"),"close_code",None) is None]
                 for conn_id in affected:
                     if available_children:
                         new_channel=available_children[0]

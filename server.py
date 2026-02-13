@@ -299,19 +299,16 @@ class GhostWireServer:
 
     async def close_connections_for_child(self,child_id):
         affected=[conn_id for conn_id,mapped_child in self.conn_channel_map.items() if mapped_child==child_id]
-        alternative_children=self.get_available_child_ids()
         if self.conn_data_seq_enabled:
-            striped_count=len(self.conn_data_seq_enabled)
-            logger.info(f"Child {child_id} lost during striped mode, {striped_count} striped connections will continue with remaining {len(alternative_children)} children")
-            for conn_id in affected:
-                if conn_id not in self.conn_data_seq_enabled:
-                    self.conn_channel_map.pop(conn_id,None)
-                    self.clear_conn_data_state(conn_id)
-                    await self.close_conn_writer(conn_id,flush=False)
-                    self.tunnel_manager.remove_connection(conn_id)
-                else:
-                    self.conn_channel_map.pop(conn_id,None)
+            striped_conn_ids=list(self.conn_data_seq_enabled)
+            logger.warning(f"Child {child_id} lost during striped mode, closing {len(striped_conn_ids)} striped connections to avoid sequence gaps")
+            for conn_id in striped_conn_ids:
+                self.conn_channel_map.pop(conn_id,None)
+                self.clear_conn_data_state(conn_id)
+                await self.close_conn_writer(conn_id,flush=False)
+                self.tunnel_manager.remove_connection(conn_id)
             return
+        alternative_children=self.get_available_child_ids()
         if not alternative_children:
             logger.warning(f"Child {child_id} lost, closing {len(affected)} connections (no alternatives)")
             for conn_id in affected:
