@@ -683,6 +683,9 @@ class GhostWireServer:
         elif self.config.protocol=="grpc":
             from grpc_transport import start_grpc_server
             await start_grpc_server(self)
+        elif self.config.protocol=="aiohttp-ws":
+            from aiohttp_ws_transport import start_aiohttp_ws_server
+            await start_aiohttp_ws_server(self)
         else:
             async with websockets.serve(self.handle_client,self.config.listen_host,self.config.listen_port,max_size=None,max_queue=self.ws_max_queue,ping_interval=None,compression=None,write_limit=self.ws_write_limit,close_timeout=10,process_request=self.process_request):
                 await self.shutdown_event.wait()

@@ -588,6 +588,37 @@ class GhostWireClient:
                 await self.grpc_transport.send(info_msg)
                 self.reconnect_delay=self.config.initial_delay
                 return True
+            elif self.config.protocol=="aiohttp-ws":
+                import aiohttp
+                from aiohttp_ws_transport import AiohttpClientWebSocket
+                session=aiohttp.ClientSession()
+                ws=await session.ws_connect(server_url,max_msg_size=0,compress=False,heartbeat=None)
+                self.main_websocket=AiohttpClientWebSocket(ws,session)
+                self.websocket=self.main_websocket
+                pubkey_msg=await asyncio.wait_for(self.main_websocket.recv(),timeout=10)
+                if len(pubkey_msg)<9:
+                    raise ValueError("Invalid public key message")
+                msg_type,_,pubkey_bytes,_=unpack_message(pubkey_msg,None)
+                if msg_type!=MSG_PUBKEY:
+                    raise ValueError("Expected public key from server")
+                server_public_key=deserialize_public_key(pubkey_bytes)
+                client_private_key,client_public_key=generate_rsa_keypair()
+                auth_msg=pack_auth_message(self.config.token,server_public_key,role="main")
+                await self.main_websocket.send(auth_msg)
+                await self.main_websocket.send(pack_pubkey(client_public_key))
+                session_msg=await asyncio.wait_for(self.main_websocket.recv(),timeout=10)
+                session_type,_,session_payload,_=unpack_message(session_msg,None)
+                if session_type!=MSG_SESSION_KEY:
+                    raise ValueError("Expected session key from server")
+                self.key=unpack_session_key(session_payload,client_private_key)
+                self.last_ping_time=time.time()
+                self.last_pong_time=time.time()
+                self.last_rx_time=time.time()
+                logger.info("Connected and authenticated to server")
+                info_msg=pack_info(self.updater.current_version,self.key)
+                await self.main_websocket.send(info_msg)
+                self.reconnect_delay=self.config.initial_delay
+                return True
             else:
                 self.main_websocket=await websockets.connect(server_url,max_size=None,max_queue=self.ws_max_queue,ping_interval=None,compression=None,write_limit=self.ws_write_limit,close_timeout=10)
                 self.websocket=self.main_websocket
@@ -642,7 +673,14 @@ class GhostWireClient:
     async def connect_child_channel(self,server_url,slot_id):
         child_id=generate(size=20)
         try:
-            ws=await websockets.connect(server_url,max_size=None,max_queue=self.ws_max_queue,ping_interval=None,compression=None,write_limit=self.ws_write_limit,close_timeout=10)
+            if self.config.protocol=="aiohttp-ws":
+                import aiohttp
+                from aiohttp_ws_transport import AiohttpClientWebSocket
+                session=aiohttp.ClientSession()
+                ws_raw=await session.ws_connect(server_url,max_msg_size=0,compress=False,heartbeat=None)
+                ws=AiohttpClientWebSocket(ws_raw,session)
+            else:
+                ws=await websockets.connect(server_url,max_size=None,max_queue=self.ws_max_queue,ping_interval=None,compression=None,write_limit=self.ws_write_limit,close_timeout=10)
             pubkey_msg=await asyncio.wait_for(ws.recv(),timeout=10)
             if len(pubkey_msg)<9:
                 raise ValueError("Invalid child public key message")
