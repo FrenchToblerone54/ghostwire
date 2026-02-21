@@ -70,7 +70,7 @@ class GhostWireClient:
         self.seq_timeout=30
         self.io_chunk_size=262144
         self.writer_batch_bytes=1048576
-        self.ws_send_batch_bytes=4194304
+        self.ws_send_batch_bytes=config.ws_send_batch_bytes
         self.ws_write_limit=4194304
         self.ws_max_queue=2048
         self.updater=Updater("client",check_interval=config.update_check_interval,check_on_startup=config.update_check_on_startup,http_proxy=config.update_http_proxy,https_proxy=config.update_https_proxy)

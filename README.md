@@ -168,6 +168,12 @@ For web browsing with hundreds of concurrent connections (typical modern website
   - **16-32 channels**: High usage (> 200 concurrent connections, multiple users)
   - More channels = better concurrency but higher memory usage
 
+- **`ws_send_batch_bytes`** (both, default: 65536): Max bytes batched into a single WebSocket frame
+  - Lower values reduce latency under high load (speedtest, video) by preventing large frames from blocking smaller packets
+  - **65536 (64KB)**: Default, best balance for most use cases
+  - **262144 (256KB)**: Higher throughput, some latency increase under load
+  - **16384 (16KB)**: Lowest latency, slightly lower throughput
+
 - **`ping_interval`** and **`ping_timeout`**: Critical for CloudFlare stability (configure on both server and client)
   - **For low latency (< 50ms)**: `ping_interval=10`, `ping_timeout=10`
   - **For high latency (> 200ms, CloudFlare)**: `ping_interval=30`, `ping_timeout=60`

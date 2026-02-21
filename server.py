@@ -59,7 +59,7 @@ class GhostWireServer:
         self.seq_timeout=30
         self.io_chunk_size=262144
         self.writer_batch_bytes=1048576
-        self.ws_send_batch_bytes=4194304
+        self.ws_send_batch_bytes=config.ws_send_batch_bytes
         self.ws_write_limit=4194304
         self.ws_max_queue=2048
         logger.info("Generating RSA key pair for secure authentication...")

@@ -75,6 +75,7 @@ class ServerConfig:
         self.ping_timeout=config["server"].get("ping_timeout",10)
         self.ws_pool_enabled=config["server"].get("ws_pool_enabled",False)
         self.ws_pool_children=config["server"].get("ws_pool_children",2)
+        self.ws_send_batch_bytes=config["server"].get("ws_send_batch_bytes",65536)
         self.auto_update=config["server"].get("auto_update",True)
         self.update_check_interval=config["server"].get("update_check_interval",300)
         self.update_check_on_startup=config["server"].get("update_check_on_startup",True)
@@ -96,6 +97,7 @@ class ClientConfig:
         self.token=config["server"]["token"]
         self.ping_interval=config["server"].get("ping_interval",10)
         self.ping_timeout=config["server"].get("ping_timeout",10)
+        self.ws_send_batch_bytes=config["server"].get("ws_send_batch_bytes",65536)
         self.initial_delay=config["reconnect"].get("initial_delay",1)
         self.max_delay=config["reconnect"].get("max_delay",60)
         self.multiplier=config["reconnect"].get("multiplier",2)
