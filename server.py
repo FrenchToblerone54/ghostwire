@@ -7,8 +7,6 @@ import time
 import struct
 import argparse
 import os
-import websockets
-from http import HTTPStatus
 from protocol import *
 from config import ServerConfig
 from auth import validate_token
@@ -492,7 +490,7 @@ class GhostWireServer:
                         pass
         except asyncio.TimeoutError:
             logger.warning(f"Client {client_id} authentication timeout")
-        except websockets.exceptions.ConnectionClosed:
+        except ConnectionError:
             logger.info(f"Client {client_id} disconnected")
         except Exception as e:
             logger.error(f"Error handling client {client_id}: {e}",exc_info=True)
@@ -674,9 +672,6 @@ class GhostWireServer:
             self.clear_conn_data_state(conn_id)
             self.tunnel_manager.remove_connection(conn_id)
 
-    async def process_request(self,connection,request):
-        if request.path!=self.config.websocket_path:
-            return connection.respond(HTTPStatus.NOT_FOUND,"")
     async def start(self):
         self.running=True
         logger.info(f"Starting GhostWire server ({self.config.protocol}) on {self.config.listen_host}:{self.config.listen_port}")
@@ -690,12 +685,9 @@ class GhostWireServer:
         elif self.config.protocol=="grpc":
             from grpc_transport import start_grpc_server
             await start_grpc_server(self)
-        elif self.config.protocol=="aiohttp-ws":
+        else:
             from aiohttp_ws_transport import start_aiohttp_ws_server
             await start_aiohttp_ws_server(self)
-        else:
-            async with websockets.serve(self.handle_client,self.config.listen_host,self.config.listen_port,max_size=None,max_queue=self.ws_max_queue,ping_interval=None,compression=None,write_limit=self.ws_write_limit,close_timeout=10,process_request=self.process_request):
-                await self.shutdown_event.wait()
         if update_task:
             update_task.cancel()
         logger.info("Server shutting down")

@@ -6,12 +6,14 @@ import sys
 import time
 import struct
 import argparse
-import websockets
+import random
+import aiohttp
 from nanoid import generate
 from protocol import *
 from config import ClientConfig
 from tunnel import TunnelManager
 from updater import Updater
+from aiohttp_ws_transport import AiohttpClientWebSocket
 
 logging.basicConfig(level=logging.INFO,format="%(asctime)s [%(levelname)s] %(message)s")
 logger=logging.getLogger(__name__)
@@ -528,9 +530,10 @@ class GhostWireClient:
                         pass
             if not self.running or self.shutdown_event.is_set() or not self.main_websocket:
                 break
-            logger.info(f"Child slot {slot_id} reconnecting in {delay} seconds...")
+            jitter=delay*(0.5+random.random())
+            logger.info(f"Child slot {slot_id} reconnecting in {jitter:.1f} seconds...")
             try:
-                await asyncio.wait_for(self.shutdown_event.wait(),timeout=delay)
+                await asyncio.wait_for(self.shutdown_event.wait(),timeout=jitter)
                 break
             except asyncio.TimeoutError:
                 pass
@@ -595,8 +598,6 @@ class GhostWireClient:
                 self.reconnect_delay=self.config.initial_delay
                 return True
             elif self.config.protocol=="aiohttp-ws":
-                import aiohttp
-                from aiohttp_ws_transport import AiohttpClientWebSocket
                 session=aiohttp.ClientSession()
                 ws=await session.ws_connect(server_url,max_msg_size=0,compress=False,heartbeat=None)
                 self.main_websocket=AiohttpClientWebSocket(ws,session)
@@ -626,7 +627,9 @@ class GhostWireClient:
                 self.reconnect_delay=self.config.initial_delay
                 return True
             else:
-                self.main_websocket=await websockets.connect(server_url,max_size=None,max_queue=self.ws_max_queue,ping_interval=None,compression=None,write_limit=self.ws_write_limit,close_timeout=10)
+                session=aiohttp.ClientSession()
+                ws=await session.ws_connect(server_url,max_msg_size=0,compress=False,heartbeat=None)
+                self.main_websocket=AiohttpClientWebSocket(ws,session)
                 self.websocket=self.main_websocket
                 pubkey_msg=await asyncio.wait_for(self.main_websocket.recv(),timeout=10)
                 if len(pubkey_msg)<9:
@@ -666,8 +669,10 @@ class GhostWireClient:
             try:
                 test_url=self.config.server_url.replace(self.config.cloudflare_host,ip)
                 start=time.time()
-                ws=await asyncio.wait_for(websockets.connect(test_url,max_size=None,ping_interval=None,compression=None,write_limit=self.ws_write_limit),timeout=5)
+                session=aiohttp.ClientSession()
+                ws_raw=await asyncio.wait_for(session.ws_connect(test_url,max_msg_size=0,compress=False,heartbeat=None),timeout=5)
                 latency=time.time()-start
+                ws=AiohttpClientWebSocket(ws_raw,session)
                 await ws.close()
                 if latency<best_latency:
                     best_latency=latency
@@ -679,14 +684,9 @@ class GhostWireClient:
     async def connect_child_channel(self,server_url,slot_id):
         child_id=generate(size=20)
         try:
-            if self.config.protocol=="aiohttp-ws":
-                import aiohttp
-                from aiohttp_ws_transport import AiohttpClientWebSocket
-                session=aiohttp.ClientSession()
-                ws_raw=await session.ws_connect(server_url,max_msg_size=0,compress=False,heartbeat=None)
-                ws=AiohttpClientWebSocket(ws_raw,session)
-            else:
-                ws=await websockets.connect(server_url,max_size=None,max_queue=self.ws_max_queue,ping_interval=None,compression=None,write_limit=self.ws_write_limit,close_timeout=10)
+            session=aiohttp.ClientSession()
+            ws_raw=await session.ws_connect(server_url,max_msg_size=0,compress=False,heartbeat=None)
+            ws=AiohttpClientWebSocket(ws_raw,session)
             pubkey_msg=await asyncio.wait_for(ws.recv(),timeout=10)
             if len(pubkey_msg)<9:
                 raise ValueError("Invalid child public key message")
@@ -827,7 +827,7 @@ class GhostWireClient:
                     elif msg_type==MSG_CHILD_CFG and channel_id=="main":
                         child_count=unpack_child_cfg(payload)
                         await self.sync_child_workers(child_count)
-        except websockets.exceptions.ConnectionClosed:
+        except ConnectionError:
             logger.warning(f"Connection closed by server channel={channel_id}")
         except Exception as e:
             logger.error(f"Receive error channel={channel_id}: {e}",exc_info=True)
@@ -956,7 +956,7 @@ class GhostWireClient:
                     wait_tasks={receive_task,shutdown_task}
                     cf_timer=None
                     if self.config.cloudflare_enabled and self.config.cloudflare_max_connection_time>0:
-                        cf_timer=asyncio.create_task(asyncio.sleep(self.config.cloudflare_max_connection_time))
+                        cf_timer=asyncio.create_task(asyncio.sleep(self.config.cloudflare_max_connection_time*random.uniform(0.85,1.0)))
                         wait_tasks.add(cf_timer)
                     done,pending=await asyncio.wait(wait_tasks,return_when=asyncio.FIRST_COMPLETED)
                     if cf_timer and cf_timer in done:
@@ -1008,9 +1008,10 @@ class GhostWireClient:
                     self.main_control_queue=None
                     self.tunnel_manager.close_all()
             if self.running and not self.shutdown_event.is_set():
-                logger.info(f"Reconnecting in {self.reconnect_delay} seconds...")
+                jitter_delay=self.reconnect_delay*(0.5+random.random())
+                logger.info(f"Reconnecting in {jitter_delay:.1f} seconds...")
                 try:
-                    await asyncio.wait_for(self.shutdown_event.wait(),timeout=self.reconnect_delay)
+                    await asyncio.wait_for(self.shutdown_event.wait(),timeout=jitter_delay)
                     break
                 except asyncio.TimeoutError:
                     pass
