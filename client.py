@@ -264,7 +264,7 @@ class GhostWireClient:
         return [child_id for child_id,channel in self.child_channels.items() if channel.get("ws") and getattr(channel.get("ws"),"close_code",None) is None]
 
     def should_stripe_data(self):
-        return self.config.protocol=="websocket" and self.desired_child_count>1 and len(self.get_available_child_ids())>1
+        return self.config.protocol in ("websocket","aiohttp-ws") and self.desired_child_count>1 and len(self.get_available_child_ids())>1
 
     def next_data_seq(self,conn_id):
         seq=self.conn_data_tx_seq.get(conn_id,0)
@@ -275,9 +275,7 @@ class GhostWireClient:
         if self.should_stripe_data():
             child_ids=self.get_available_child_ids()
             if child_ids:
-                child_id=child_ids[self.data_rr_index%len(child_ids)]
-                self.data_rr_index+=1
-                return child_id
+                return min(child_ids,key=lambda cid: self.child_channels[cid]["send_queue"].qsize() if self.child_channels.get(cid) and self.child_channels[cid].get("send_queue") else float("inf"))
         return self.conn_channel_map.get(conn_id,"main")
 
     async def maybe_finalize_close_seq(self,conn_id):

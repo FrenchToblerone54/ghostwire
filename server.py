@@ -50,6 +50,7 @@ class GhostWireServer:
         self.child_rr_index=0
         self.data_rr_index=0
         self.child_queue_sizes={}
+        self.current_child_count=0
         self.conn_data_tx_seq={}
         self.conn_data_seq_enabled=set()
         self.conn_data_rx_expected={}
@@ -384,6 +385,7 @@ class GhostWireServer:
         sender=None
         ping_monitor=None
         seq_monitor=None
+        pool_monitor=None
         send_queue=asyncio.Queue(maxsize=512)
         control_queue=asyncio.Queue(maxsize=256)
         stop_event=asyncio.Event()
@@ -460,10 +462,12 @@ class GhostWireServer:
                     ping_monitor=asyncio.create_task(self.ping_monitor_loop())
                     seq_monitor=asyncio.create_task(self.sequence_timeout_monitor())
                     if self.config.ws_pool_enabled:
+                        self.current_child_count=self.config.ws_pool_min
                         try:
-                            control_queue.put_nowait(pack_child_cfg(self.config.ws_pool_children,self.key))
+                            control_queue.put_nowait(pack_child_cfg(self.current_child_count,self.key))
                         except asyncio.QueueFull:
                             logger.warning("Main control queue full, child config dropped")
+                        pool_monitor=asyncio.create_task(self.pool_manager_loop())
                 else:
                     self.child_channels[child_id]={"ws":websocket,"send_queue":send_queue,"control_queue":control_queue,"stop_event":stop_event,"sender":sender}
                 if not self.listeners:
@@ -505,6 +509,8 @@ class GhostWireServer:
                 ping_monitor.cancel()
             if seq_monitor:
                 seq_monitor.cancel()
+            if pool_monitor:
+                pool_monitor.cancel()
             if authenticated:
                 if role=="main":
                     await self.close_child_channels()
@@ -520,6 +526,33 @@ class GhostWireServer:
                 else:
                     self.child_channels.pop(child_id,None)
                     await self.close_connections_for_child(child_id)
+
+    async def pool_manager_loop(self):
+        scale_down_count=0
+        while self.running and not self.shutdown_event.is_set():
+            await asyncio.sleep(self.config.ws_pool_scale_interval)
+            if not self.main_websocket or not self.send_queue:
+                continue
+            qsize=self.send_queue.qsize()
+            active=len(self.tunnel_manager.connections)
+            target=self.current_child_count
+            if qsize>=self.config.ws_pool_scale_up or active>self.current_child_count*10:
+                target=min(self.config.ws_pool_children,self.current_child_count+1)
+                scale_down_count=0
+            elif qsize<=self.config.ws_pool_scale_down and active<self.current_child_count*5:
+                scale_down_count+=1
+                if scale_down_count>=3:
+                    target=max(self.config.ws_pool_min,self.current_child_count-1)
+                    scale_down_count=0
+            else:
+                scale_down_count=0
+            if target!=self.current_child_count:
+                self.current_child_count=target
+                try:
+                    self.control_queue.put_nowait(pack_child_cfg(self.current_child_count,self.key))
+                    logger.info(f"Pool scaled to {self.current_child_count} connections (queue={qsize}, active={active})")
+                except asyncio.QueueFull:
+                    pass
 
     async def ping_monitor_loop(self):
         interval=max(2,self.ping_timeout//2)
@@ -685,6 +718,9 @@ class GhostWireServer:
         elif self.config.protocol=="grpc":
             from grpc_transport import start_grpc_server
             await start_grpc_server(self)
+        elif self.config.protocol=="udp":
+            from udp_transport import start_udp_server
+            await start_udp_server(self)
         else:
             from aiohttp_ws_transport import start_aiohttp_ws_server
             await start_aiohttp_ws_server(self)
