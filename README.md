@@ -124,8 +124,9 @@ listen_backlog=4096        # TCP listen queue depth
 websocket_path="/ws"       # Only used for websocket protocol
 ping_interval=30           # Application-level ping interval (seconds)
 ping_timeout=60            # Connection timeout (seconds)
-ws_pool_enabled=true       # Enable child channel pooling
-ws_pool_children=16        # Number of child channels (2-32, increase for high concurrency)
+ws_pool_enabled=true       # Enable child channel pooling (default: true)
+ws_pool_children=8         # Max child channels (default: 8)
+ws_pool_min=2              # Min always-connected channels (default: 2)
 auto_update=true
 update_check_interval=300
 update_check_on_startup=true
@@ -161,12 +162,12 @@ The panel is accessible at `http://127.0.0.1:9090/{path}/` where `path` is a ran
 
 For web browsing with hundreds of concurrent connections (typical modern websites load 50-200+ resources):
 
-- **`ws_pool_children`** (server only, default: 2): Number of parallel child channels for handling connections
-  - The server controls child channel count and sends it to connected clients
-  - **2-4 channels**: Low usage (< 50 concurrent connections)
-  - **8-16 channels**: Medium usage (50-200 concurrent connections, typical web browsing)
-  - **16-32 channels**: High usage (> 200 concurrent connections, multiple users)
-  - More channels = better concurrency but higher memory usage
+- **`ws_pool_enabled`** (server only, default: true): Enable dynamic multi-connection pool to mitigate TCP-over-TCP meltdown under heavy load
+- **`ws_pool_children`** (server only, default: 8): Max parallel WebSocket connections
+  - **2-4**: Light usage (< 50 concurrent connections)
+  - **8**: Default, good for most deployments
+  - **16-32**: Heavy usage (multiple simultaneous users)
+- **`ws_pool_min`** (server only, default: 2): Minimum always-connected channels; pool scales between min and max based on load
 
 - **`ws_send_batch_bytes`** (both, default: 65536): Max bytes batched into a single WebSocket frame
   - Lower values reduce latency under high load (speedtest, video) by preventing large frames from blocking smaller packets
