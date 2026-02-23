@@ -143,19 +143,13 @@ class GhostWireServer:
         try:
             while not stop_event.is_set() or not send_queue.empty() or not control_queue.empty():
                 batch=bytearray()
-                # CloudFlare optimization: Adapt batch size based on queue depth
-                # Lower latency when queue is shallow, higher throughput when queue is deep
-                queue_depth = send_queue.qsize() + control_queue.qsize()
-                if queue_depth < 10:
-                    # Low load: send immediately for low latency
-                    adaptive_batch_size = 16384  # 16KB
-                elif queue_depth < 50:
-                    # Medium load: use configured batch size
-                    adaptive_batch_size = self.ws_send_batch_bytes
+                queue_depth=send_queue.qsize()+control_queue.qsize()
+                if queue_depth<10:
+                    adaptive_batch_size=16384
+                elif queue_depth<50:
+                    adaptive_batch_size=self.ws_send_batch_bytes
                 else:
-                    # High load: larger batches for better throughput
-                    adaptive_batch_size = min(self.ws_send_batch_bytes * 2, 131072)  # max 128KB
-
+                    adaptive_batch_size=min(self.ws_send_batch_bytes*2,131072)
                 for _ in range(64):
                     try:
                         batch.extend(control_queue.get_nowait())

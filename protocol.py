@@ -3,7 +3,7 @@ import os
 import hashlib
 from functools import lru_cache
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
-from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives import hashes,serialization
 from cryptography.hazmat.primitives.asymmetric import rsa,padding
 
 MSG_PUBKEY=0x00
