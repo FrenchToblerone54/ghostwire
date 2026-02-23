@@ -8,6 +8,7 @@ import os
 from urllib.parse import urlparse
 from grpclib.server import Server,Stream
 from grpclib.client import Channel
+from nanoid import generate
 from protocol import *
 from tunnel_grpc import TunnelBase,TunnelStub
 from tunnel_pb2 import TunnelMessage
@@ -76,7 +77,7 @@ class GrpcTunnelServicer(TunnelBase):
             except Exception as e:
                 logger.warning(f"Invalid client public key from {peer}: {e}")
                 return
-            key=os.urandom(32)
+            key=generate(size=32).encode()
             session_msg=pack_session_key(key,client_public_key)
             await stream.send_message(TunnelMessage(data=session_msg))
             logger.info(f"gRPC client authenticated: {peer}")

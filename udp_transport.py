@@ -3,6 +3,7 @@ import asyncio
 import logging
 import os
 import struct
+from nanoid import generate
 from protocol import *
 
 logger=logging.getLogger(__name__)
@@ -241,7 +242,7 @@ class _UDPServerProtocol(asyncio.DatagramProtocol):
             if key_type!=MSG_PUBKEY:
                 return
             client_public_key=deserialize_public_key(client_pubkey_bytes)
-            session_key=os.urandom(32)
+            session_key=generate(size=32).encode()
             self.send_to(pack_session_key(session_key,client_public_key),addr)
             session=UDPSession(addr,self.send_to)
             ghost.key=session_key

@@ -464,7 +464,8 @@ class GhostWireServer:
                     except Exception as e:
                         logger.warning(f"Rejecting {client_id}: invalid client public key: {e}")
                         return
-                    self.key=os.urandom(32)
+                    from nanoid import generate
+                    self.key=generate(size=32).encode()
                     await websocket.send(pack_session_key(self.key,client_public_key))
                 logger.info(f"Client {client_id} authenticated role={role}")
                 sender=asyncio.create_task(self.sender_task(websocket,send_queue,control_queue,stop_event))
