@@ -9,7 +9,7 @@ on:
 jobs:
   integration-test:
     runs-on: ubuntu-22.04
-    timeout-minutes: 5
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -59,5 +59,5 @@ jobs:
           level="info"
           file="/tmp/ghostwire-test-client.log"
           EOF
-      - name: Data transfer test
-        run: python3.13 tests/test_data_transfer.py
+      - name: Throughput test
+        run: python3.13 tests/test_throughput.py
