@@ -52,28 +52,26 @@ if [ ! -f /etc/ghostwire/server.toml ]; then
 
     echo ""
     echo "Port Mapping Configuration (users in Iran connect to this):"
-    echo "Examples: 8080=80, 8443=443, 8000-8010=3000, 9000=1.1.1.1:443"
-    TUNNELS=()
+    echo "Enter comma-separated port mappings:"
+    echo "Examples:"
+    echo "  8080=80,8443=443              # Simple port forwarding"
+    echo "  8000-8010=3000                # Port range to single destination"
+    echo "  9000=1.1.1.1:443              # Forward to remote IP"
+    echo "  127.0.0.1:8080=80             # Bind to specific local IP"
     while true; do
-        while true; do
-            read -p "  Local port to listen on (e.g., 8080 or 8000-8010): " LOCAL_PORT
-            if [ -z "$LOCAL_PORT" ]; then
-                echo "❌ This field is required"
-                continue
-            fi
-            break
-        done
-        read -p "  Remote destination (e.g., 80 or 1.1.1.1:443) [same as local]: " REMOTE_DEST
-        if [ -z "$REMOTE_DEST" ]; then
-            TUNNELS+=("${LOCAL_PORT}")
-        else
-            TUNNELS+=("${LOCAL_PORT}=${REMOTE_DEST}")
+        read -p "  Port mappings [8080=80,8443=443]: " TUNNEL_INPUT
+        TUNNEL_INPUT=${TUNNEL_INPUT:-"8080=80,8443=443"}
+        if [ -z "$TUNNEL_INPUT" ]; then
+            echo "❌ This field is required"
+            continue
         fi
-        read -p "  Add another tunnel? [y/N]: " ADD_MORE
-        if [[ ! $ADD_MORE =~ ^[Yy]$ ]]; then
-            break
-        fi
+        break
     done
+
+    # Convert comma-separated input to array
+    IFS=',' read -ra TUNNELS <<< "$TUNNEL_INPUT"
+    # Trim whitespace from each tunnel
+    TUNNELS=("${TUNNELS[@]// /}")
 
     echo ""
     read -p "Enable auto-update? [Y/n]: " AUTO_UPDATE
