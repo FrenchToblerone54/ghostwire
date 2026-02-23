@@ -207,6 +207,18 @@ if [[ $REPLY =~ ^[Yy]$ ]]; then
     echo "Installing nginx..."
     apt-get update && apt-get install -y nginx certbot python3-certbot-nginx
 
+    # Remove existing ghostwire config if it exists
+    if [ -f /etc/nginx/sites-available/ghostwire ]; then
+        echo "Removing existing ghostwire nginx configuration..."
+        rm -f /etc/nginx/sites-enabled/ghostwire
+        rm -f /etc/nginx/sites-available/ghostwire
+        # Restart nginx if it's running
+        if systemctl is-active --quiet nginx; then
+            echo "Restarting nginx..."
+            systemctl restart nginx
+        fi
+    fi
+
     read -p "Enter your domain name: " DOMAIN
 
     cat > /etc/nginx/sites-available/ghostwire <<EOF
@@ -281,6 +293,17 @@ EOF
         echo
         if [[ $REPLY =~ ^[Yy]$ ]]; then
             read -p "Enter panel domain name: " PANEL_DOMAIN
+            # Remove existing panel config if it exists
+            if [ -f /etc/nginx/sites-available/ghostwire-panel ]; then
+                echo "Removing existing ghostwire-panel nginx configuration..."
+                rm -f /etc/nginx/sites-enabled/ghostwire-panel
+                rm -f /etc/nginx/sites-available/ghostwire-panel
+                # Restart nginx if it's running
+                if systemctl is-active --quiet nginx; then
+                    echo "Restarting nginx..."
+                    systemctl restart nginx
+                fi
+            fi
             cat > /etc/nginx/sites-available/ghostwire-panel <<EOF
 server {
     listen 80;

@@ -89,7 +89,13 @@ class AiohttpWebSocketAdapter:
 async def start_aiohttp_ws_server(ghost_server):
     app=web.Application()
     async def websocket_handler(request):
-        ws=web.WebSocketResponse(max_msg_size=0,compress=False,heartbeat=None)
+        # CloudFlare optimization: Enable native WebSocket ping/pong with 30s interval
+        # This is more efficient than application-level pings for CloudFlare's keepalive
+        ws=web.WebSocketResponse(
+            max_msg_size=0,
+            compress=False,
+            heartbeat=30  # 30 second native ping interval - CloudFlare friendly
+        )
         await ws.prepare(request)
         adapter=AiohttpWebSocketAdapter(ws,request)
         try:
