@@ -8,7 +8,7 @@ GhostWire is a WebSocket-based reverse tunnel system designed to help users in c
 
 - **Multiple protocol support** - WebSocket, HTTP/2, and gRPC transports
 - **RSA-encrypted authentication** - Token invisible to TLS-terminating proxies (CloudFlare-proof)
-- **End-to-end AES-256-GCM encryption** - All tunnel data encrypted with nanoid-derived keys
+- **End-to-end AES-256-GCM encryption** - All tunnel data encrypted with random 256-bit session keys
 - **Reverse tunnel architecture** - Client connects TO server (bypasses outbound blocking)
 - **Bidirectional streaming** - Single persistent connection over TLS
 - **Flexible TCP port forwarding** - Port ranges, IP binding, custom mappings

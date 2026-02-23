@@ -1,0 +1,63 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  integration-test:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - run: pip install -r requirements.txt
+      - name: Create test configs
+        run: |
+          cat > test_server.toml <<'EOF'
+          [server]
+          listen_host="127.0.0.1"
+          listen_port=9443
+          websocket_path="/ws"
+          ping_timeout=10
+          ws_pool_enabled=true
+          ws_pool_children=2
+          auto_update=false
+
+          [auth]
+          token="test_token_123456"
+
+          [tunnels]
+          ports=["9080=8888"]
+
+          [logging]
+          level="info"
+          file="/tmp/ghostwire-test-server.log"
+          EOF
+          cat > test_client.toml <<'EOF'
+          [server]
+          url="ws://127.0.0.1:9443/ws"
+          token="test_token_123456"
+          auto_update=false
+
+          [reconnect]
+          initial_delay=1
+          max_delay=10
+          multiplier=2
+
+          [cloudflare]
+          enabled=false
+          ips=[]
+          host=""
+          check_interval=300
+
+          [logging]
+          level="info"
+          file="/tmp/ghostwire-test-client.log"
+          EOF
+      - name: Data transfer test
+        run: python3.13 tests/test_data_transfer.py
