@@ -1,5 +1,7 @@
 # GhostWire - Anti-Censorship Reverse Tunnel
 
+**[📖 فارسی / Persian](README_FA.md)**
+
 GhostWire is a WebSocket-based reverse tunnel system designed to help users in censored countries access the internet freely. It uses secure WebSocket connections over TLS, making it difficult to detect and block.
 
 ## Features
