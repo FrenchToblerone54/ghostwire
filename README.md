@@ -504,7 +504,7 @@ GhostWire implements multiple layers of security:
    - Standard HTTPS encryption
 
 3. **Application Layer**: AES-256-GCM end-to-end encryption
-   - Server generates random 32-char nanoid session key
+   - Server generates 256-bit random session key
    - Session key sent to client via RSA-2048 encrypted exchange
    - All tunnel data encrypted with this session key
    - Protects against intermediate inspection
