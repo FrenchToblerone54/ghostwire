@@ -136,6 +136,7 @@ ws_pool_children=8
 ws_pool_min=2
 ws_pool_stripe=false
 udp_enabled=true
+ws_send_batch_bytes=65536
 auto_update=${AUTO_UPDATE}
 update_check_interval=300
 update_check_on_startup=true
