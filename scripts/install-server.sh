@@ -3,95 +3,145 @@ set -e
 
 GITHUB_REPO="frenchtoblerone54/ghostwire"
 VERSION="latest"
+RED="\033[0;31m"
+GREEN="\033[0;32m"
+YELLOW="\033[1;33m"
+BLUE="\033[0;34m"
+CYAN="\033[0;36m"
+MAGENTA="\033[0;35m"
+BOLD="\033[1m"
+DIM="\033[2m"
+NC="\033[0m"
 
-echo "GhostWire Server Installation"
-echo "=============================="
+p_step() { echo -e "\n${BLUE}${BOLD}▶  $1${NC}"; }
+p_ok() { echo -e "  ${GREEN}✓${NC}  $1"; }
+p_warn() { echo -e "  ${YELLOW}⚠${NC}  $1"; }
+p_err() { echo -e "  ${RED}✗${NC}  $1" >&2; }
+p_info() { echo -e "  ${CYAN}ℹ${NC}  $1"; }
+p_ask() { echo -ne "  ${MAGENTA}?${NC}  $1"; }
+p_sep() { echo -e "  ${DIM}------------------------------------------------------------${NC}"; }
 
+p_token_box() {
+    local token="$1"
+    echo ""
+    echo -e "  ${YELLOW}${BOLD}╔══════════════════════════════════════════════════════════╗${NC}"
+    echo -e "  ${YELLOW}${BOLD}║  🔑  AUTHENTICATION TOKEN                                ║${NC}"
+    echo -e "  ${YELLOW}${BOLD}║                                                          ║${NC}"
+    echo -e "  ${YELLOW}${BOLD}║  ${NC}${BOLD}${token}${NC}${YELLOW}${BOLD}  ║${NC}"
+    echo -e "  ${YELLOW}${BOLD}║                                                          ║${NC}"
+    echo -e "  ${YELLOW}${BOLD}║  ⚠  Save this token! You'll need it for the client.     ║${NC}"
+    echo -e "  ${YELLOW}${BOLD}╚══════════════════════════════════════════════════════════╝${NC}"
+    echo ""
+}
+
+p_panel_box() {
+    local url="$1"
+    echo ""
+    echo -e "  ${CYAN}${BOLD}╔══════════════════════════════════════════════════════════╗${NC}"
+    echo -e "  ${CYAN}${BOLD}║  🖥  Web Management Panel                                ║${NC}"
+    echo -e "  ${CYAN}${BOLD}║                                                          ║${NC}"
+    echo -e "  ${CYAN}${BOLD}║  URL: ${NC}${url}${CYAN}${BOLD}  ║${NC}"
+    echo -e "  ${CYAN}${BOLD}║                                                          ║${NC}"
+    echo -e "  ${CYAN}${BOLD}║  Bookmark this URL — it's your admin panel!              ║${NC}"
+    echo -e "  ${CYAN}${BOLD}╚══════════════════════════════════════════════════════════╝${NC}"
+    echo ""
+}
+
+clear
+echo -e "${CYAN}${BOLD}"
+echo "  ============================================================"
+echo "    GhostWire Server Installation                           "
+echo "    Anti-Censorship Reverse Tunnel                          "
+echo "  ============================================================"
+echo -e "${NC}"
+echo -e "  ${DIM}Source: github.com/${GITHUB_REPO}${NC}"
+echo ""
+
+p_step "Checking prerequisites..."
 if [ "$EUID" -ne 0 ]; then
-    echo "Please run as root (use sudo)"
+    p_err "Please run as root (use sudo)"
     exit 1
 fi
+p_ok "Root access: OK"
 
 ARCH=$(uname -m)
 if [ "$ARCH" != "x86_64" ]; then
-    echo "Error: Only x86_64 (amd64) architecture is supported"
+    p_err "Only x86_64 (amd64) architecture is supported"
     exit 1
 fi
+p_ok "CPU: x86_64 — OK"
 
 OS=$(uname -s)
 if [ "$OS" != "Linux" ]; then
-    echo "Error: Only Linux is supported"
+    p_err "Only Linux is supported"
     exit 1
 fi
+p_ok "OS: Linux — OK"
 
-echo "Downloading GhostWire server..."
+p_step "Downloading GhostWire server..."
 wget -q --show-progress "https://github.com/${GITHUB_REPO}/releases/${VERSION}/download/ghostwire-server" -O /tmp/ghostwire-server
 wget -q "https://github.com/${GITHUB_REPO}/releases/${VERSION}/download/ghostwire-server.sha256" -O /tmp/ghostwire-server.sha256
 
-echo "Verifying checksum..."
+p_step "Verifying checksum..."
 cd /tmp
 sha256sum -c ghostwire-server.sha256
+p_ok "Checksum verified"
 
-echo "Installing binary..."
+p_step "Installing binary..."
 install -m 755 /tmp/ghostwire-server /usr/local/bin/ghostwire-server
+p_ok "Binary installed to /usr/local/bin/ghostwire-server"
 
-echo "Creating configuration directory..."
+p_step "Creating configuration directory..."
 mkdir -p /etc/ghostwire
+p_ok "Directory ready: /etc/ghostwire"
 
 if [ ! -f /etc/ghostwire/server.toml ]; then
-    echo "Generating authentication token..."
+    p_step "Generating authentication token..."
     TOKEN=$(/usr/local/bin/ghostwire-server --generate-token)
-
-    echo ""
-    echo "WebSocket Configuration (client connects to this):"
-    echo "Note: Default is 127.0.0.1 for security (use with nginx/proxy)"
-    read -p "  WebSocket listen host [127.0.0.1]: " WS_HOST
+    p_ok "Token generated"
+    p_sep
+    p_info "WebSocket Configuration (client connects to this):"
+    p_info "Default is 127.0.0.1 for security (use with nginx/proxy)"
+    p_ask "WebSocket listen host [127.0.0.1]: "; read -r WS_HOST
     WS_HOST=${WS_HOST:-127.0.0.1}
-    read -p "  WebSocket listen port [8443]: " WS_PORT
+    p_ask "WebSocket listen port [8443]: "; read -r WS_PORT
     WS_PORT=${WS_PORT:-8443}
-
-    echo ""
-    echo "Port Mapping Configuration (users in Iran connect to this):"
-    echo "Enter comma-separated port mappings:"
-    echo "Examples:"
-    echo "  8080=80,8443=443              # Simple port forwarding"
-    echo "  8000-8010=3000                # Port range to single destination"
-    echo "  9000=1.1.1.1:443              # Forward to remote IP"
-    echo "  127.0.0.1:8080=80             # Bind to specific local IP"
+    p_sep
+    p_info "Port Mapping Configuration (users connect to this):"
+    p_info "Enter comma-separated port mappings:"
+    p_info "  8080=80,8443=443              — Simple port forwarding"
+    p_info "  8000-8010=3000                — Port range to single destination"
+    p_info "  9000=1.1.1.1:443              — Forward to remote IP"
+    p_info "  127.0.0.1:8080=80             — Bind to specific local IP"
     while true; do
-        read -p "  Port mappings [8080=80,8443=443]: " TUNNEL_INPUT
+        p_ask "Port mappings [8080=80,8443=443]: "; read -r TUNNEL_INPUT
         TUNNEL_INPUT=${TUNNEL_INPUT:-"8080=80,8443=443"}
         if [ -z "$TUNNEL_INPUT" ]; then
-            echo "❌ This field is required"
+            p_err "This field is required"
             continue
         fi
         break
     done
-
-    # Convert comma-separated input to array
-    IFS=',' read -ra TUNNELS <<< "$TUNNEL_INPUT"
-    # Trim whitespace from each tunnel
+    IFS="," read -ra TUNNELS <<< "$TUNNEL_INPUT"
     TUNNELS=("${TUNNELS[@]// /}")
-
-    echo ""
-    read -p "Enable auto-update? [Y/n]: " AUTO_UPDATE
+    p_sep
+    p_ask "Enable auto-update? [Y/n]: "; read -r AUTO_UPDATE
     AUTO_UPDATE=${AUTO_UPDATE:-y}
     if [[ $AUTO_UPDATE =~ ^[Yy]$ ]]; then
         AUTO_UPDATE="true"
     else
         AUTO_UPDATE="false"
     fi
-
-    echo ""
-    read -p "Enable web management panel? [Y/n]: " ENABLE_PANEL
+    p_sep
+    p_ask "Enable web management panel? [Y/n]: "; read -r ENABLE_PANEL
     ENABLE_PANEL=${ENABLE_PANEL:-y}
     PANEL_ENABLED="false"
     PANEL_CONFIG=""
     if [[ $ENABLE_PANEL =~ ^[Yy]$ ]]; then
         PANEL_ENABLED="true"
-        read -p "  Panel listen host [127.0.0.1]: " PANEL_HOST
+        p_ask "  Panel listen host [127.0.0.1]: "; read -r PANEL_HOST
         PANEL_HOST=${PANEL_HOST:-127.0.0.1}
-        read -p "  Panel listen port [9090]: " PANEL_PORT
+        p_ask "  Panel listen port [9090]: "; read -r PANEL_PORT
         PANEL_PORT=${PANEL_PORT:-9090}
         PANEL_PATH=$(/usr/local/bin/ghostwire-server --generate-token)
         PANEL_CONFIG="
@@ -102,23 +152,21 @@ port=${PANEL_PORT}
 path=\"${PANEL_PATH}\"
 threads=4"
     fi
-
-    TUNNEL_ARRAY=$(printf ',"%s"' "${TUNNELS[@]}")
+    TUNNEL_ARRAY=$(printf ",\"%s\"" "${TUNNELS[@]}")
     TUNNEL_ARRAY="[${TUNNEL_ARRAY:1}]"
-
-    echo ""
-    echo "Configuration Summary:"
-    echo "  WebSocket: ${WS_HOST}:${WS_PORT}/ws"
-    echo "  Tunnels: ${TUNNEL_ARRAY}"
-    echo "  Auto-update: ${AUTO_UPDATE}"
+    p_sep
+    p_step "Configuration Summary:"
+    p_info "WebSocket: ${WS_HOST}:${WS_PORT}/ws"
+    p_info "Tunnels: ${TUNNEL_ARRAY}"
+    p_info "Auto-update: ${AUTO_UPDATE}"
     if [[ $PANEL_ENABLED == "true" ]]; then
-        echo "  Web panel: http://${PANEL_HOST}:${PANEL_PORT}/${PANEL_PATH}/"
+        p_info "Web panel: http://${PANEL_HOST}:${PANEL_PORT}/${PANEL_PATH}/"
     fi
     echo ""
-    read -p "Confirm and save configuration? [Y/n]: " CONFIRM
+    p_ask "Confirm and save configuration? [Y/n]: "; read -r CONFIRM
     CONFIRM=${CONFIRM:-y}
     if [[ ! $CONFIRM =~ ^[Yy]$ ]]; then
-        echo "Installation cancelled"
+        p_err "Installation cancelled"
         exit 1
     fi
 
@@ -152,37 +200,20 @@ level="info"
 file="/var/log/ghostwire-server.log"${PANEL_CONFIG}
 EOF
 
-    echo ""
-    echo "Configuration created at /etc/ghostwire/server.toml"
-    echo ""
-    echo "╔════════════════════════════════════════════════════════════╗"
-    echo "║                 AUTHENTICATION TOKEN                       ║"
-    echo "║                                                            ║"
-    echo "║  ${TOKEN}  ║"
-    echo "║                                                            ║"
-    echo "║  ⚠️  Save this token! You'll need it for the client.      ║"
-    echo "╚════════════════════════════════════════════════════════════╝"
-    echo ""
+    p_ok "Configuration created at /etc/ghostwire/server.toml"
+    p_token_box "$TOKEN"
     if [[ $PANEL_ENABLED == "true" ]]; then
-        echo "╔════════════════════════════════════════════════════════════╗"
-        echo "║                   WEB MANAGEMENT PANEL                     ║"
-        echo "║                                                            ║"
-        echo "║  URL: http://${PANEL_HOST}:${PANEL_PORT}/${PANEL_PATH}/      "
-        echo "║                                                            ║"
-        echo "║  📝 Bookmark this URL - it's your admin panel!            ║"
-        echo "╚════════════════════════════════════════════════════════════╝"
-        echo ""
+        p_panel_box "http://${PANEL_HOST}:${PANEL_PORT}/${PANEL_PATH}/"
     fi
-    echo "💡 Tip: If using a domain, enable CloudFlare proxy for better"
-    echo "   reliability and DDoS protection."
+    p_info "Tip: If using a domain, enable Cloudflare proxy for better reliability and DDoS protection."
     echo ""
 else
-    echo "Configuration already exists at /etc/ghostwire/server.toml"
-    WS_PORT=$(grep "listen_port" /etc/ghostwire/server.toml | cut -d'=' -f2 | tr -d ' ')
+    p_warn "Configuration already exists at /etc/ghostwire/server.toml"
+    WS_PORT=$(grep "listen_port" /etc/ghostwire/server.toml | cut -d"=" -f2 | tr -d " ")
     WS_PORT=${WS_PORT:-8443}
 fi
 
-echo "Installing systemd service..."
+p_step "Installing systemd service..."
 cat > /etc/systemd/system/ghostwire-server.service <<EOF
 [Unit]
 Description=GhostWire Server
@@ -199,26 +230,23 @@ WantedBy=multi-user.target
 EOF
 
 systemctl daemon-reload
+p_ok "Systemd service installed"
 
-read -p "Setup nginx now? [y/N] " -n 1 -r
-echo
+p_sep
+p_ask "Setup nginx now? [y/N] "; read -r -n 1 REPLY; echo
 if [[ $REPLY =~ ^[Yy]$ ]]; then
-    echo "Installing nginx..."
+    p_step "Installing nginx..."
     apt-get update && apt-get install -y nginx certbot python3-certbot-nginx
-
-    # Remove existing ghostwire config if it exists
     if [ -f /etc/nginx/sites-available/ghostwire ]; then
-        echo "Removing existing ghostwire nginx configuration..."
+        p_warn "Removing existing ghostwire nginx configuration..."
         rm -f /etc/nginx/sites-enabled/ghostwire
         rm -f /etc/nginx/sites-available/ghostwire
-        # Restart nginx if it's running
         if systemctl is-active --quiet nginx; then
-            echo "Restarting nginx..."
+            p_info "Restarting nginx..."
             systemctl restart nginx
         fi
     fi
-
-    read -p "Enter your domain name: " DOMAIN
+    p_ask "Enter your domain name: "; read -r DOMAIN
 
     cat > /etc/nginx/sites-available/ghostwire <<EOF
 server {
@@ -234,8 +262,7 @@ EOF
     ln -sf /etc/nginx/sites-available/ghostwire /etc/nginx/sites-enabled/
     nginx -t && systemctl reload nginx
 
-    read -p "Generate TLS certificate with Let's Encrypt? [y/N] " -n 1 -r
-    echo
+    p_ask "Generate TLS certificate with Let's Encrypt? [y/N] "; read -r -n 1 REPLY; echo
     if [[ $REPLY =~ ^[Yy]$ ]]; then
         certbot --nginx -d ${DOMAIN}
     fi
@@ -285,21 +312,18 @@ server {
 EOF
 
     systemctl reload nginx
-    echo "nginx configured for ${DOMAIN}"
+    p_ok "nginx configured for ${DOMAIN}"
     if [[ $PANEL_ENABLED == "true" ]]; then
         echo ""
-        read -p "Setup nginx for panel on another domain? [y/N] " -n 1 -r
-        echo
+        p_ask "Setup nginx for panel on another domain? [y/N] "; read -r -n 1 REPLY; echo
         if [[ $REPLY =~ ^[Yy]$ ]]; then
-            read -p "Enter panel domain name: " PANEL_DOMAIN
-            # Remove existing panel config if it exists
+            p_ask "Enter panel domain name: "; read -r PANEL_DOMAIN
             if [ -f /etc/nginx/sites-available/ghostwire-panel ]; then
-                echo "Removing existing ghostwire-panel nginx configuration..."
+                p_warn "Removing existing ghostwire-panel nginx configuration..."
                 rm -f /etc/nginx/sites-enabled/ghostwire-panel
                 rm -f /etc/nginx/sites-available/ghostwire-panel
-                # Restart nginx if it's running
                 if systemctl is-active --quiet nginx; then
-                    echo "Restarting nginx..."
+                    p_info "Restarting nginx..."
                     systemctl restart nginx
                 fi
             fi
@@ -314,8 +338,7 @@ server {
 EOF
             ln -sf /etc/nginx/sites-available/ghostwire-panel /etc/nginx/sites-enabled/
             nginx -t && systemctl reload nginx
-            read -p "Generate TLS certificate for ${PANEL_DOMAIN}? [y/N] " -n 1 -r
-            echo
+            p_ask "Generate TLS certificate for ${PANEL_DOMAIN}? [y/N] "; read -r -n 1 REPLY; echo
             if [[ $REPLY =~ ^[Yy]$ ]]; then
                 certbot --nginx -d ${PANEL_DOMAIN}
             fi
@@ -348,30 +371,31 @@ server {
 }
 EOF
             systemctl reload nginx
-            echo "nginx configured for panel: https://${PANEL_DOMAIN}/${PANEL_PATH}/"
+            p_ok "nginx configured for panel: https://${PANEL_DOMAIN}/${PANEL_PATH}/"
         fi
     fi
 else
-    echo "Skipping nginx setup. Example configuration available at the GitHub repository README."
+    p_info "Skipping nginx setup. Example configuration available at the GitHub repository README."
 fi
 
-echo "Enabling and starting GhostWire server..."
+p_step "Enabling and starting GhostWire server..."
 systemctl enable ghostwire-server
 if systemctl is-active --quiet ghostwire-server; then
-    echo "Restarting existing service..."
+    p_warn "Restarting existing service..."
     systemctl restart ghostwire-server
 else
     systemctl start ghostwire-server
 fi
+p_ok "GhostWire server is running"
 
+p_sep
+p_ok "Installation complete!"
+p_sep
+p_info "Configuration: /etc/ghostwire/server.toml"
 echo ""
-echo "Installation complete!"
-echo ""
-echo "Configuration: /etc/ghostwire/server.toml"
-echo ""
-echo "Useful commands:"
-echo "  sudo systemctl status ghostwire-server"
-echo "  sudo systemctl stop ghostwire-server"
-echo "  sudo systemctl restart ghostwire-server"
-echo "  sudo journalctl -u ghostwire-server -f"
+p_info "Useful commands:"
+echo -e "  ${DIM}sudo systemctl status ghostwire-server${NC}"
+echo -e "  ${DIM}sudo systemctl stop ghostwire-server${NC}"
+echo -e "  ${DIM}sudo systemctl restart ghostwire-server${NC}"
+echo -e "  ${DIM}sudo journalctl -u ghostwire-server -f${NC}"
 echo ""

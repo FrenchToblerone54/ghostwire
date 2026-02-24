@@ -3,82 +3,112 @@ set -e
 
 GITHUB_REPO="frenchtoblerone54/ghostwire"
 VERSION="latest"
+RED="\033[0;31m"
+GREEN="\033[0;32m"
+YELLOW="\033[1;33m"
+BLUE="\033[0;34m"
+CYAN="\033[0;36m"
+MAGENTA="\033[0;35m"
+BOLD="\033[1m"
+DIM="\033[2m"
+NC="\033[0m"
 
-echo "GhostWire Client Installation"
-echo "=============================="
+p_step() { echo -e "\n${BLUE}${BOLD}▶  $1${NC}"; }
+p_ok() { echo -e "  ${GREEN}✓${NC}  $1"; }
+p_warn() { echo -e "  ${YELLOW}⚠${NC}  $1"; }
+p_err() { echo -e "  ${RED}✗${NC}  $1" >&2; }
+p_info() { echo -e "  ${CYAN}ℹ${NC}  $1"; }
+p_ask() { echo -ne "  ${MAGENTA}?${NC}  $1"; }
+p_sep() { echo -e "  ${DIM}------------------------------------------------------------${NC}"; }
 
+clear
+echo -e "${CYAN}${BOLD}"
+echo "  ============================================================"
+echo "    GhostWire Client Installation                           "
+echo "    Anti-Censorship Reverse Tunnel                          "
+echo "  ============================================================"
+echo -e "${NC}"
+echo -e "  ${DIM}Source: github.com/${GITHUB_REPO}${NC}"
+echo ""
+
+p_step "Checking prerequisites..."
 if [ "$EUID" -ne 0 ]; then
-    echo "Please run as root (use sudo)"
+    p_err "Please run as root (use sudo)"
     exit 1
 fi
+p_ok "Root access: OK"
 
 ARCH=$(uname -m)
 if [ "$ARCH" != "x86_64" ]; then
-    echo "Error: Only x86_64 (amd64) architecture is supported"
+    p_err "Only x86_64 (amd64) architecture is supported"
     exit 1
 fi
+p_ok "CPU: x86_64 — OK"
 
 OS=$(uname -s)
 if [ "$OS" != "Linux" ]; then
-    echo "Error: Only Linux is supported"
+    p_err "Only Linux is supported"
     exit 1
 fi
+p_ok "OS: Linux — OK"
 
-echo "Downloading GhostWire client..."
+p_step "Downloading GhostWire client..."
 wget -q --show-progress "https://github.com/${GITHUB_REPO}/releases/${VERSION}/download/ghostwire-client" -O /tmp/ghostwire-client
 wget -q "https://github.com/${GITHUB_REPO}/releases/${VERSION}/download/ghostwire-client.sha256" -O /tmp/ghostwire-client.sha256
 
-echo "Verifying checksum..."
+p_step "Verifying checksum..."
 cd /tmp
 sha256sum -c ghostwire-client.sha256
+p_ok "Checksum verified"
 
-echo "Installing binary..."
+p_step "Installing binary..."
 install -m 755 /tmp/ghostwire-client /usr/local/bin/ghostwire-client
+p_ok "Binary installed to /usr/local/bin/ghostwire-client"
 
-echo "Creating configuration directory..."
+p_step "Creating configuration directory..."
 mkdir -p /etc/ghostwire
+p_ok "Directory ready: /etc/ghostwire"
 
 if [ ! -f /etc/ghostwire/client.toml ]; then
-    echo ""
-    echo "Client Configuration"
-    echo "===================="
+    p_sep
+    p_step "Client Configuration"
     while true; do
-        read -p "Server URL (e.g., wss://tunnel.example.com/ws or https://tunnel.example.com/ws): " SERVER_URL
+        p_ask "Server URL (e.g., wss://tunnel.example.com/ws or https://tunnel.example.com/ws): "; read -r SERVER_URL
         if [ -z "$SERVER_URL" ]; then
-            echo "❌ This field is required"
+            p_err "This field is required"
             continue
         fi
         if [[ ! "$SERVER_URL" =~ ^(wss?|https?):// ]]; then
-            echo "❌ URL must start with ws://, wss://, http://, or https://"
+            p_err "URL must start with ws://, wss://, http://, or https://"
             continue
         fi
         break
     done
     while true; do
-        read -p "Authentication token: " TOKEN
+        p_ask "Authentication token: "; read -r TOKEN
         if [ -z "$TOKEN" ]; then
-            echo "❌ This field is required"
+            p_err "This field is required"
             continue
         fi
         break
     done
-    read -p "Enable auto-update? [Y/n]: " AUTO_UPDATE
+    p_ask "Enable auto-update? [Y/n]: "; read -r AUTO_UPDATE
     AUTO_UPDATE=${AUTO_UPDATE:-y}
     if [[ $AUTO_UPDATE =~ ^[Yy]$ ]]; then
         AUTO_UPDATE="true"
     else
         AUTO_UPDATE="false"
     fi
+    p_sep
+    p_step "Configuration Summary:"
+    p_info "Server URL: ${SERVER_URL}"
+    p_info "Token: ${TOKEN:0:10}..."
+    p_info "Auto-update: ${AUTO_UPDATE}"
     echo ""
-    echo "Configuration Summary:"
-    echo "  Server URL: ${SERVER_URL}"
-    echo "  Token: ${TOKEN:0:10}..."
-    echo "  Auto-update: ${AUTO_UPDATE}"
-    echo ""
-    read -p "Confirm and save configuration? [Y/n]: " CONFIRM
+    p_ask "Confirm and save configuration? [Y/n]: "; read -r CONFIRM
     CONFIRM=${CONFIRM:-y}
     if [[ ! $CONFIRM =~ ^[Yy]$ ]]; then
-        echo "Installation cancelled"
+        p_err "Installation cancelled"
         exit 1
     fi
 
@@ -111,10 +141,10 @@ level="info"
 file="/var/log/ghostwire-client.log"
 EOF
 
-    echo "Configuration created at /etc/ghostwire/client.toml"
+    p_ok "Configuration created at /etc/ghostwire/client.toml"
 fi
 
-echo "Installing systemd service..."
+p_step "Installing systemd service..."
 cat > /etc/systemd/system/ghostwire-client.service <<EOF
 [Unit]
 Description=GhostWire Client
@@ -131,28 +161,28 @@ WantedBy=multi-user.target
 EOF
 
 systemctl daemon-reload
+p_ok "Systemd service installed"
 
-echo "Enabling and starting GhostWire client..."
+p_step "Enabling and starting GhostWire client..."
 systemctl enable ghostwire-client
 if systemctl is-active --quiet ghostwire-client; then
-    echo "Restarting existing service..."
+    p_warn "Restarting existing service..."
     systemctl restart ghostwire-client
 else
     systemctl start ghostwire-client
 fi
+p_ok "GhostWire client is running"
 
+p_sep
+p_ok "Installation complete!"
+p_sep
+p_info "Client is running and listening on configured ports"
+p_info "Configuration: /etc/ghostwire/client.toml"
+p_info "Tip: If connection is unreliable, enable Cloudflare proxy for your domain to improve stability."
 echo ""
-echo "Installation complete!"
-echo ""
-echo "Client is running and listening on configured ports"
-echo "Configuration: /etc/ghostwire/client.toml"
-echo ""
-echo "💡 Tip: If connection is unreliable, enable CloudFlare proxy"
-echo "   for your domain to improve stability and reduce latency."
-echo ""
-echo "Useful commands:"
-echo "  sudo systemctl status ghostwire-client"
-echo "  sudo systemctl stop ghostwire-client"
-echo "  sudo systemctl restart ghostwire-client"
-echo "  sudo journalctl -u ghostwire-client -f"
+p_info "Useful commands:"
+echo -e "  ${DIM}sudo systemctl status ghostwire-client${NC}"
+echo -e "  ${DIM}sudo systemctl stop ghostwire-client${NC}"
+echo -e "  ${DIM}sudo systemctl restart ghostwire-client${NC}"
+echo -e "  ${DIM}sudo journalctl -u ghostwire-client -f${NC}"
 echo ""
