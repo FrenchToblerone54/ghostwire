@@ -953,6 +953,9 @@ def cmd_panel_configure():
     print(f"nginx configured for panel: https://{domain}/{panel_path}/")
 
 def main():
+    if len(sys.argv)>=2 and sys.argv[1]=="update":
+        asyncio.run(Updater("server").manual_update())
+        sys.exit(0)
     if len(sys.argv)>=3 and sys.argv[1]=="panel" and sys.argv[2]=="configure":
         cmd_panel_configure()
         sys.exit(0)

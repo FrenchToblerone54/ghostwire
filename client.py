@@ -1142,6 +1142,9 @@ def signal_handler(client,loop):
     loop.call_soon_threadsafe(client.stop)
 
 def main():
+    if len(sys.argv)>=2 and sys.argv[1]=="update":
+        asyncio.run(Updater("client").manual_update())
+        sys.exit(0)
     parser=argparse.ArgumentParser(description="GhostWire Client")
     parser.add_argument("-c","--config",help="Path to configuration file")
     parser.add_argument("--generate-token",action="store_true",help="Generate authentication token and exit")
