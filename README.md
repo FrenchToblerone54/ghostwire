@@ -462,6 +462,27 @@ With `enabled=true` and empty `ips`/`host`, the IP selection is skipped but the 
 - Application-level ping (30s) replaces WebSocket ping for CloudFlare reliability
 - CloudFlare adds 5-500ms latency - this is normal and handled by the implementation
 
+## CLI Commands
+
+**Update (manual):**
+```bash
+sudo ghostwire-server update
+sudo ghostwire-client update
+```
+Checks GitHub for a newer release, downloads and verifies it, installs in place, then restarts the service automatically.
+
+**Panel setup:**
+```bash
+sudo ghostwire-server panel configure
+```
+Interactive wizard: enables the web panel in `server.toml` (if not already configured) and optionally sets up nginx with a TLS certificate.
+
+**Other:**
+```bash
+ghostwire-server --version
+ghostwire-server --generate-token
+```
+
 ## systemd Management
 
 **Server:**

@@ -502,6 +502,27 @@ max_connection_time=1740  # 29 دقیقه - قبل از محدودیت 30 دقی
 
 با `enabled=true` و `ips`/`host` خالی، انتخاب IP نادیده گرفته می‌شود اما اتصال مجدد پیشگیرانه همچنان اعمال می‌شود.
 
+## دستورات CLI
+
+**بروزرسانی دستی:**
+```bash
+sudo ghostwire-server update
+sudo ghostwire-client update
+```
+آخرین نسخه را از GitHub بررسی می‌کند، دانلود و تأیید می‌کند، جایگزین فایل فعلی می‌شود و سرویس را به‌صورت خودکار ری‌استارت می‌کند.
+
+**راه‌اندازی پنل:**
+```bash
+sudo ghostwire-server panel configure
+```
+ویزارد تعاملی: پنل مدیریت وب را در `server.toml` فعال می‌کند (اگر قبلاً تنظیم نشده باشد) و به صورت اختیاری nginx را با گواهی TLS پیکربندی می‌کند.
+
+**سایر:**
+```bash
+ghostwire-server --version
+ghostwire-server --generate-token
+```
+
 ## مدیریت systemd
 
 ### سرور:
