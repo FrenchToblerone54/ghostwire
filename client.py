@@ -72,7 +72,7 @@ class GhostWireClient:
         self.conn_data_close_seq={}
         self.seq_timeout=30
         self.io_chunk_size=262144
-        self.writer_batch_bytes=1048576
+        self.writer_batch_bytes=262144
         self.ws_send_batch_bytes=config.ws_send_batch_bytes
         self.ws_write_limit=4194304
         self.ws_max_queue=2048
@@ -1142,6 +1142,9 @@ def signal_handler(client,loop):
     loop.call_soon_threadsafe(client.stop)
 
 def main():
+    if len(sys.argv)>=2 and sys.argv[1]=="update":
+        asyncio.run(Updater("client").manual_update())
+        sys.exit(0)
     parser=argparse.ArgumentParser(description="GhostWire Client")
     parser.add_argument("-c","--config",help="Path to configuration file")
     parser.add_argument("--generate-token",action="store_true",help="Generate authentication token and exit")

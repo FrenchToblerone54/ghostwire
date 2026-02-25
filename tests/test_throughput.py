@@ -90,7 +90,6 @@ async def test():
     await data_server.stop()
     await asyncio.sleep(1)
     print("\n✅ Benchmark complete!")
-    print("   Save these numbers to compare with concurrent receive implementation")
     return True
 
 try:

@@ -26,7 +26,7 @@ class Updater:
     def get_current_version(self):
         script_path=Path(sys.argv[0])
         if script_path.name.startswith(f"ghostwire-{self.component_name}"):
-            return "v0.12.4"
+            return "v0.13.3"
         return "dev"
 
     async def http_get(self,url,timeout):
@@ -113,6 +113,47 @@ class Updater:
         except Exception as e:
             logger.error(f"Error downloading update: {e}",exc_info=True)
             return False
+
+    async def manual_update(self):
+        import subprocess
+        import shutil
+        if not self.http_proxy:
+            self.http_proxy=os.environ.get("HTTP_PROXY",os.environ.get("http_proxy",""))
+        if not self.https_proxy:
+            self.https_proxy=os.environ.get("HTTPS_PROXY",os.environ.get("https_proxy",""))
+        print(f"Current version: {self.current_version}")
+        print("Checking for updates...")
+        new_version=await self.check_for_update()
+        if not new_version:
+            print("Already up to date.")
+            return
+        print(f"Downloading {new_version}...")
+        tmpdir=f"/tmp/ghostwire-update-{self.component_name}-{os.getpid()}"
+        os.makedirs(tmpdir,exist_ok=True)
+        binary_path=os.path.join(tmpdir,f"ghostwire-{self.component_name}")
+        status=await self.http_download(self.update_url,binary_path,300)
+        if status!=200:
+            print(f"Download failed: HTTP {status}")
+            return
+        os.chmod(binary_path,0o755)
+        checksum_status,checksum_body=await self.http_get(f"{self.update_url}.sha256",30)
+        if checksum_status==200:
+            parts=checksum_body.decode().strip().split()
+            expected=parts[0] if parts else checksum_body.decode().strip()
+            if not self.verify_checksum(binary_path,expected):
+                print("Checksum verification failed!")
+                return
+            print("Checksum verified.")
+        executable_path=sys.argv[0]
+        shutil.move(executable_path,f"{executable_path}.old")
+        shutil.move(binary_path,executable_path)
+        os.chmod(executable_path,0o755)
+        print(f"Updated to {new_version}!")
+        ret=subprocess.run(["systemctl","restart",f"ghostwire-{self.component_name}"],capture_output=True)
+        if ret.returncode==0:
+            print(f"Service ghostwire-{self.component_name} restarted.")
+        else:
+            print(f"Update installed. Restart manually: systemctl restart ghostwire-{self.component_name}")
 
     async def update_loop(self,shutdown_event):
         logger.info(f"Auto-update checker started (interval: {self.check_interval}s, current version: {self.current_version})")

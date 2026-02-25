@@ -61,7 +61,7 @@ class GhostWireServer:
         self.seq_timeout=30
         self.udp_sessions={}
         self.io_chunk_size=262144
-        self.writer_batch_bytes=1048576
+        self.writer_batch_bytes=262144
         self.ws_send_batch_bytes=config.ws_send_batch_bytes
         self.ws_write_limit=4194304
         self.ws_max_queue=2048
@@ -879,7 +879,86 @@ def signal_handler(server,loop):
     logger.info("Received shutdown signal")
     loop.call_soon_threadsafe(server.stop)
 
+def cmd_panel_configure():
+    import tomllib
+    import toml
+    import subprocess
+    from auth import generate_token
+    config_path="/etc/ghostwire/server.toml"
+    for i,arg in enumerate(sys.argv):
+        if arg in ("-c","--config") and i+1<len(sys.argv):
+            config_path=sys.argv[i+1]
+            break
+    if not os.path.exists(config_path):
+        print(f"Config not found: {config_path}")
+        sys.exit(1)
+    with open(config_path,"rb") as f:
+        config=tomllib.load(f)
+    panel_cfg=config.get("panel",{})
+    panel_enabled=panel_cfg.get("enabled",False)
+    if panel_enabled:
+        panel_host=panel_cfg.get("host","127.0.0.1")
+        panel_port=panel_cfg.get("port",9090)
+        panel_path=panel_cfg.get("path","")
+        print(f"Panel already configured: http://{panel_host}:{panel_port}/{panel_path}/")
+    else:
+        print("=== GhostWire Panel Configure ===\n")
+        panel_host=input("Panel listen host [127.0.0.1]: ").strip() or "127.0.0.1"
+        panel_port=int(input("Panel listen port [9090]: ").strip() or "9090")
+        panel_path=generate_token()
+        config["panel"]={"enabled":True,"host":panel_host,"port":panel_port,"path":panel_path,"threads":4}
+        with open(config_path,"w") as f:
+            toml.dump(config,f)
+        print(f"\nPanel configured!\nURL: http://{panel_host}:{panel_port}/{panel_path}/")
+        reply=input("Restart ghostwire-server to apply? [Y/n]: ").strip().lower()
+        if reply!="n":
+            subprocess.run(["systemctl","restart","ghostwire-server"])
+    reply=input("\nSetup nginx for panel? [y/N]: ").strip().lower()
+    if reply!="y":
+        return
+    if subprocess.run(["which","nginx"],capture_output=True).returncode!=0:
+        print("Installing nginx...")
+        subprocess.run(["apt-get","update"])
+        subprocess.run(["apt-get","install","-y","nginx","certbot","python3-certbot-nginx"])
+    domain=input("Enter domain name for panel: ").strip()
+    if not domain:
+        print("No domain entered, skipping nginx setup.")
+        return
+    nginx_http=f"server {{\n    listen 80;\n    server_name {domain};\n    location /.well-known/acme-challenge/ {{\n        root /var/www/html;\n    }}\n}}\n"
+    with open("/etc/nginx/sites-available/ghostwire-panel","w") as f:
+        f.write(nginx_http)
+    subprocess.run(["ln","-sf","/etc/nginx/sites-available/ghostwire-panel","/etc/nginx/sites-enabled/ghostwire-panel"])
+    subprocess.run(["nginx","-t"])
+    subprocess.run(["systemctl","reload","nginx"])
+    reply=input(f"Generate TLS certificate for {domain}? [y/N]: ").strip().lower()
+    if reply=="y":
+        subprocess.run(["certbot","--nginx","-d",domain])
+    nginx_full=(
+        f"server {{\n    listen 80;\n    server_name {domain};\n"
+        f"    location /.well-known/acme-challenge/ {{\n        root /var/www/html;\n    }}\n"
+        f"    location / {{\n        return 301 https://$server_name$request_uri;\n    }}\n}}\n"
+        f"server {{\n    listen 443 ssl http2;\n    server_name {domain};\n"
+        f"    ssl_certificate /etc/letsencrypt/live/{domain}/fullchain.pem;\n"
+        f"    ssl_certificate_key /etc/letsencrypt/live/{domain}/privkey.pem;\n"
+        f"    ssl_protocols TLSv1.2 TLSv1.3;\n    ssl_ciphers HIGH:!aNULL:!MD5;\n"
+        f"    location / {{\n        proxy_pass http://{panel_host}:{panel_port};\n"
+        f"        proxy_http_version 1.1;\n        proxy_set_header Host $host;\n"
+        f"        proxy_set_header X-Real-IP $remote_addr;\n"
+        f"        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;\n"
+        f"        proxy_set_header X-Forwarded-Proto $scheme;\n    }}\n}}\n"
+    )
+    with open("/etc/nginx/sites-available/ghostwire-panel","w") as f:
+        f.write(nginx_full)
+    subprocess.run(["systemctl","reload","nginx"])
+    print(f"nginx configured for panel: https://{domain}/{panel_path}/")
+
 def main():
+    if len(sys.argv)>=2 and sys.argv[1]=="update":
+        asyncio.run(Updater("server").manual_update())
+        sys.exit(0)
+    if len(sys.argv)>=3 and sys.argv[1]=="panel" and sys.argv[2]=="configure":
+        cmd_panel_configure()
+        sys.exit(0)
     parser=argparse.ArgumentParser(description="GhostWire Server")
     parser.add_argument("-c","--config",help="Path to configuration file")
     parser.add_argument("--generate-token",action="store_true",help="Generate authentication token and exit")

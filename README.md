@@ -8,7 +8,7 @@ GhostWire is a WebSocket-based reverse tunnel system designed to help users in c
 
 - **Multiple protocol support** - WebSocket, HTTP/2, and gRPC transports
 - **RSA-encrypted authentication** - Token invisible to TLS-terminating proxies (CloudFlare-proof)
-- **End-to-end AES-256-GCM encryption** - All tunnel data encrypted with nanoid-derived keys
+- **End-to-end AES-256-GCM encryption** - All tunnel data encrypted with random 256-bit session keys
 - **Reverse tunnel architecture** - Client connects TO server (bypasses outbound blocking)
 - **Bidirectional streaming** - Single persistent connection over TLS
 - **Flexible TCP port forwarding** - Port ranges, IP binding, custom mappings
@@ -131,6 +131,7 @@ ws_pool_children=8         # Max child channels (default: 8)
 ws_pool_min=2              # Min always-connected channels (default: 2)
 ws_pool_stripe=false       # Stripe packets across channels (unstable, default: false)
 udp_enabled=true           # Also listen for UDP on tunnel ports (default: true)
+ws_send_batch_bytes=65536  # Max bytes per WebSocket frame (default: 65536)
 auto_update=true
 update_check_interval=300
 update_check_on_startup=true
@@ -198,6 +199,7 @@ url="wss://tunnel.example.com/ws"  # Use wss:// for websocket, https:// for http
 token="V1StGXR8_Z5jdHi6B-my"
 ping_interval=30           # Application-level ping interval (seconds)
 ping_timeout=60            # Connection timeout (seconds)
+ws_send_batch_bytes=65536  # Max bytes per WebSocket frame (default: 65536)
 auto_update=true
 update_check_interval=300
 update_check_on_startup=true
@@ -459,6 +461,27 @@ With `enabled=true` and empty `ips`/`host`, the IP selection is skipped but the 
 - GhostWire v0.9.3+ is optimized for CloudFlare with 64KB buffers (reduced from 16MB)
 - Application-level ping (30s) replaces WebSocket ping for CloudFlare reliability
 - CloudFlare adds 5-500ms latency - this is normal and handled by the implementation
+
+## CLI Commands
+
+**Update (manual):**
+```bash
+sudo ghostwire-server update
+sudo ghostwire-client update
+```
+Checks GitHub for a newer release, downloads and verifies it, installs in place, then restarts the service automatically.
+
+**Panel setup:**
+```bash
+sudo ghostwire-server panel configure
+```
+Interactive wizard: enables the web panel in `server.toml` (if not already configured) and optionally sets up nginx with a TLS certificate.
+
+**Other:**
+```bash
+ghostwire-server --version
+ghostwire-server --generate-token
+```
 
 ## systemd Management
 

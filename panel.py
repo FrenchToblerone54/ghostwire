@@ -1,6 +1,7 @@
 #!/usr/bin/env python3.13
 import json
 import os
+import select
 import subprocess
 import sys
 import threading
@@ -201,10 +202,18 @@ def api_logs_stream():
     def generate():
         try:
             proc=subprocess.Popen(["tail","-f","-n","50","/var/log/ghostwire-server.log"],stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True)
-            for line in iter(proc.stdout.readline,""):
-                if not line:
-                    break
-                yield f"data: {line.rstrip()}\n\n"
+            last_send=time.time()
+            while True:
+                ready=select.select([proc.stdout],[],[],1.0)[0]
+                if ready:
+                    line=proc.stdout.readline()
+                    if not line:
+                        break
+                    yield f"data: {line.rstrip()}\n\n"
+                    last_send=time.time()
+                elif time.time()-last_send>=10:
+                    yield ": heartbeat\n\n"
+                    last_send=time.time()
         except Exception as e:
             yield f"data: Error streaming logs: {e}\n\n"
     return Response(generate(),mimetype="text/event-stream")
