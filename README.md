@@ -28,7 +28,7 @@ GhostWire is a WebSocket-based reverse tunnel system designed to help users in c
 The server runs in the **censored country** with a **public IP** that can receive incoming connections.
 
 ```bash
-wget https://github.com/frenchtoblerone54/ghostwire/releases/latest/download/install-server.sh -O install-server.sh
+wget https://raw.githubusercontent.com/frenchtoblerone54/ghostwire/main/scripts/install-server.sh -O install-server.sh
 chmod +x install-server.sh
 sudo ./install-server.sh
 ```
@@ -40,7 +40,7 @@ sudo ./install-server.sh
 The client runs on a **VPS in an uncensored country** with unrestricted internet access.
 
 ```bash
-wget https://github.com/frenchtoblerone54/ghostwire/releases/latest/download/install-client.sh -O install-client.sh
+wget https://raw.githubusercontent.com/frenchtoblerone54/ghostwire/main/scripts/install-client.sh -O install-client.sh
 chmod +x install-client.sh
 sudo ./install-client.sh
 ```

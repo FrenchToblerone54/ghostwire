@@ -41,7 +41,7 @@
 سرور در کشور دارای سانسور با IP عمومی اجرا می‌شود که می‌تواند اتصالات ورودی را دریافت کند.
 
 ```bash
-wget https://github.com/frenchtoblerone54/ghostwire/releases/latest/download/install-server.sh -O install-server.sh
+wget https://raw.githubusercontent.com/frenchtoblerone54/ghostwire/main/scripts/install-server.sh -O install-server.sh
 chmod +x install-server.sh
 sudo ./install-server.sh
 ```
@@ -53,7 +53,7 @@ sudo ./install-server.sh
 کلاینت روی یک VPS در کشور بدون سانسور با دسترسی نامحدود به اینترنت اجرا می‌شود.
 
 ```bash
-wget https://github.com/frenchtoblerone54/ghostwire/releases/latest/download/install-client.sh -O install-client.sh
+wget https://raw.githubusercontent.com/frenchtoblerone54/ghostwire/main/scripts/install-client.sh -O install-client.sh
 chmod +x install-client.sh
 sudo ./install-client.sh
 ```
