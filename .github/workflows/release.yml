@@ -1,0 +1,44 @@
+name: Release
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version to release (e.g. 0.13.3 or v0.13.3)"
+        required: true
+        type: string
+permissions:
+  contents: write
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Ensure python3.13 alias
+        run: |
+          if ! command -v python3.13 >/dev/null 2>&1; then
+            sudo ln -sf "$(which python)" /usr/local/bin/python3.13
+          fi
+      - name: Normalize version input
+        id: ver
+        run: |
+          ver="${{ inputs.version }}"
+          ver="${ver#v}"
+          echo "version=$ver" >> "$GITHUB_OUTPUT"
+      - name: Install deps
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt
+      - name: Build
+        run: |
+          bash build/build.sh
+      - name: Create release
+        uses: ncipollo/release-action@v1
+        with:
+          tag: v${{ steps.ver.outputs.version }}
+          name: v${{ steps.ver.outputs.version }}
+          artifacts: dist/ghostwire-server,dist/ghostwire-server.sha256,dist/ghostwire-client,dist/ghostwire-client.sha256
+          allowUpdates: true
+          generateReleaseNotes: true
