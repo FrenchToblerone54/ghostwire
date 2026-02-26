@@ -545,6 +545,10 @@ MIT License - See LICENSE file for details
 
 Contributions are welcome! Please open an issue or submit a pull request.
 
+## Community
+
+Join the Telegram channel for updates and announcements: [@GhostSoftDev](https://t.me/GhostSoftDev)
+
 ## Support
 
 For issues and questions, please open an issue on GitHub.
