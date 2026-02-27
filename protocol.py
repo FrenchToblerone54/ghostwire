@@ -1,10 +1,14 @@
 import struct
 import os
+import asyncio
 import hashlib
 from functools import lru_cache
+from concurrent.futures import ThreadPoolExecutor
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from cryptography.hazmat.primitives import hashes,serialization
 from cryptography.hazmat.primitives.asymmetric import rsa,padding
+
+_executor=ThreadPoolExecutor(max_workers=os.cpu_count())
 
 MSG_PUBKEY=0x00
 MSG_AUTH=0x01
@@ -41,17 +45,19 @@ def rsa_encrypt(public_key,plaintext):
 def rsa_decrypt(private_key,ciphertext):
     return private_key.decrypt(ciphertext,padding.OAEP(mgf=padding.MGF1(algorithm=hashes.SHA256()),algorithm=hashes.SHA256(),label=None))
 
-def encrypt_payload(key,plaintext,header):
+async def encrypt_payload(key,plaintext,header):
     nonce=os.urandom(12)
     aesgcm=get_aesgcm(key)
-    ciphertext=aesgcm.encrypt(nonce,plaintext,header)
+    loop=asyncio.get_running_loop()
+    ciphertext=await loop.run_in_executor(_executor,aesgcm.encrypt,nonce,plaintext,header)
     return nonce+ciphertext
 
-def decrypt_payload(key,encrypted_payload,header):
+async def decrypt_payload(key,encrypted_payload,header):
     nonce=encrypted_payload[:12]
     ciphertext=encrypted_payload[12:]
     aesgcm=get_aesgcm(key)
-    return aesgcm.decrypt(nonce,ciphertext,header)
+    loop=asyncio.get_running_loop()
+    return await loop.run_in_executor(_executor,aesgcm.decrypt,nonce,bytes(ciphertext),header)
 
 def pack_header(msg_type,conn_id,payload_length):
     return struct.pack("!BII",msg_type,conn_id,payload_length)
@@ -83,13 +89,13 @@ def pack_auth_message(token,public_key=None,role="main",child_id=""):
         header=pack_header(MSG_AUTH,0,len(payload))
         return header+payload
 
-def pack_message(msg_type,conn_id,payload,key):
+async def pack_message(msg_type,conn_id,payload,key):
     aad=pack_header(msg_type,conn_id,0)
-    encrypted=encrypt_payload(key,payload,aad)
+    encrypted=await encrypt_payload(key,payload,aad)
     header=pack_header(msg_type,conn_id,len(encrypted))
     return header+encrypted
 
-def unpack_message(data,key):
+async def unpack_message(data,key):
     if len(data)<9:
         raise ValueError("Message too short")
     header=data[:9]
@@ -104,54 +110,54 @@ def unpack_message(data,key):
     if msg_type==MSG_SESSION_KEY:
         return msg_type,conn_id,payload,9+payload_length
     aad=pack_header(msg_type,conn_id,0)
-    decrypted=decrypt_payload(key,payload,aad)
+    decrypted=await decrypt_payload(key,payload,aad)
     return msg_type,conn_id,decrypted,9+payload_length
 
-def pack_connect(conn_id,remote_ip,remote_port,key):
+async def pack_connect(conn_id,remote_ip,remote_port,key):
     payload=remote_ip.encode()+struct.pack("!H",remote_port)
-    return pack_message(MSG_CONNECT,conn_id,payload,key)
+    return await pack_message(MSG_CONNECT,conn_id,payload,key)
 
-def pack_connect_udp(conn_id,remote_ip,remote_port,key):
+async def pack_connect_udp(conn_id,remote_ip,remote_port,key):
     payload=remote_ip.encode()+struct.pack("!H",remote_port)
-    return pack_message(MSG_CONNECT_UDP,conn_id,payload,key)
+    return await pack_message(MSG_CONNECT_UDP,conn_id,payload,key)
 
 def unpack_connect(payload):
     remote_ip=payload[:-2].decode()
     remote_port=struct.unpack("!H",payload[-2:])[0]
     return remote_ip,remote_port
 
-def pack_data(conn_id,data,key):
-    return pack_message(MSG_DATA,conn_id,data,key)
+async def pack_data(conn_id,data,key):
+    return await pack_message(MSG_DATA,conn_id,data,key)
 
-def pack_data_seq(conn_id,seq,data,key):
-    return pack_message(MSG_DATA_SEQ,conn_id,struct.pack("!I",seq)+data,key)
+async def pack_data_seq(conn_id,seq,data,key):
+    return await pack_message(MSG_DATA_SEQ,conn_id,struct.pack("!I",seq)+data,key)
 
 def unpack_data_seq(payload):
     return struct.unpack("!I",payload[:4])[0],payload[4:]
 
-def pack_close(conn_id,reason,key):
-    return pack_message(MSG_CLOSE,conn_id,bytes([reason]),key)
+async def pack_close(conn_id,reason,key):
+    return await pack_message(MSG_CLOSE,conn_id,bytes([reason]),key)
 
-def pack_close_seq(conn_id,seq,reason,key):
-    return pack_message(MSG_CLOSE_SEQ,conn_id,struct.pack("!IB",seq,reason),key)
+async def pack_close_seq(conn_id,seq,reason,key):
+    return await pack_message(MSG_CLOSE_SEQ,conn_id,struct.pack("!IB",seq,reason),key)
 
 def unpack_close_seq(payload):
     return struct.unpack("!IB",payload)
 
-def pack_ping(timestamp,key):
-    return pack_message(MSG_PING,0,struct.pack("!Q",timestamp),key)
+async def pack_ping(timestamp,key):
+    return await pack_message(MSG_PING,0,struct.pack("!Q",timestamp),key)
 
-def pack_pong(timestamp,key):
-    return pack_message(MSG_PONG,0,struct.pack("!Q",timestamp),key)
+async def pack_pong(timestamp,key):
+    return await pack_message(MSG_PONG,0,struct.pack("!Q",timestamp),key)
 
-def pack_error(conn_id,error_msg,key):
-    return pack_message(MSG_ERROR,conn_id,error_msg.encode(),key)
+async def pack_error(conn_id,error_msg,key):
+    return await pack_message(MSG_ERROR,conn_id,error_msg.encode(),key)
 
-def pack_info(version,key):
-    return pack_message(MSG_INFO,0,version.encode(),key)
+async def pack_info(version,key):
+    return await pack_message(MSG_INFO,0,version.encode(),key)
 
-def pack_child_cfg(child_count,key):
-    return pack_message(MSG_CHILD_CFG,0,struct.pack("!H",child_count),key)
+async def pack_child_cfg(child_count,key):
+    return await pack_message(MSG_CHILD_CFG,0,struct.pack("!H",child_count),key)
 
 def unpack_child_cfg(payload):
     return struct.unpack("!H",payload)[0]

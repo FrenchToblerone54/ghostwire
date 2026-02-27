@@ -91,7 +91,7 @@ class UDPClientTransport:
                 data=await asyncio.wait_for(self._recv_queue.get(),timeout=3)
                 if len(data)<9:
                     continue
-                msg_type,_,pubkey_bytes,_=unpack_message(data,None)
+                msg_type,_,pubkey_bytes,_=await unpack_message(data,None)
                 if msg_type!=MSG_PUBKEY:
                     continue
                 server_public_key=deserialize_public_key(pubkey_bytes)
@@ -101,7 +101,7 @@ class UDPClientTransport:
                 session_data=await asyncio.wait_for(self._recv_queue.get(),timeout=5)
                 if len(session_data)<9:
                     continue
-                session_type,_,session_payload,_=unpack_message(session_data,None)
+                session_type,_,session_payload,_=await unpack_message(session_data,None)
                 if session_type!=MSG_SESSION_KEY:
                     continue
                 self.key=unpack_session_key(session_payload,client_private_key)
@@ -219,7 +219,7 @@ class _UDPServerProtocol(asyncio.DatagramProtocol):
             auth_data=await asyncio.wait_for(self._pending_queue.get(),timeout=30)
             if len(auth_data)<9:
                 return
-            msg_type,_,encrypted_token,_=unpack_message(auth_data,None)
+            msg_type,_,encrypted_token,_=await unpack_message(auth_data,None)
             if msg_type!=MSG_AUTH:
                 return
             try:
@@ -237,7 +237,7 @@ class _UDPServerProtocol(asyncio.DatagramProtocol):
             pubkey_data=await asyncio.wait_for(self._pending_queue.get(),timeout=10)
             if len(pubkey_data)<9:
                 return
-            key_type,_,client_pubkey_bytes,_=unpack_message(pubkey_data,None)
+            key_type,_,client_pubkey_bytes,_=await unpack_message(pubkey_data,None)
             if key_type!=MSG_PUBKEY:
                 return
             client_public_key=deserialize_public_key(client_pubkey_bytes)

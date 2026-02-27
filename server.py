@@ -410,7 +410,7 @@ class GhostWireServer:
                 if len(buffer)<9:
                     logger.warning(f"Incomplete auth from {client_id}")
                     return
-                msg_type,conn_id,encrypted_token,consumed=unpack_message(buffer,None)
+                msg_type,conn_id,encrypted_token,consumed=await unpack_message(buffer,None)
                 del buffer[:consumed]
                 if msg_type!=MSG_AUTH:
                     logger.warning(f"Expected AUTH message from {client_id}")
@@ -450,7 +450,7 @@ class GhostWireServer:
                         logger.warning(f"Rejecting {client_id}: invalid client public key message")
                         return
                     try:
-                        key_msg_type,_,client_pubkey_bytes,_=unpack_message(client_pubkey_msg,None)
+                        key_msg_type,_,client_pubkey_bytes,_=await unpack_message(client_pubkey_msg,None)
                         if key_msg_type!=MSG_PUBKEY:
                             logger.warning(f"Rejecting {client_id}: expected client public key message")
                             return
@@ -474,7 +474,7 @@ class GhostWireServer:
                     if self.config.ws_pool_enabled:
                         self.current_child_count=self.config.ws_pool_min
                         try:
-                            control_queue.put_nowait(pack_child_cfg(self.current_child_count,self.key))
+                            control_queue.put_nowait(await pack_child_cfg(self.current_child_count,self.key))
                         except asyncio.QueueFull:
                             logger.warning("Main control queue full, child config dropped")
                         pool_monitor=asyncio.create_task(self.pool_manager_loop())
@@ -489,7 +489,7 @@ class GhostWireServer:
                 buffer.extend(message)
                 while len(buffer)>=9:
                     try:
-                        msg_type,conn_id,payload,consumed=unpack_message(buffer,self.key)
+                        msg_type,conn_id,payload,consumed=await unpack_message(buffer,self.key)
                         del buffer[:consumed]
                     except ValueError:
                         break
@@ -498,7 +498,7 @@ class GhostWireServer:
                     elif msg_type==MSG_PING:
                         timestamp=struct.unpack("!Q",payload)[0]
                         try:
-                            control_queue.put_nowait(pack_pong(timestamp,self.key))
+                            control_queue.put_nowait(await pack_pong(timestamp,self.key))
                         except asyncio.QueueFull:
                             logger.warning(f"Control queue full, dropping PONG")
                     elif msg_type==MSG_PONG:
@@ -563,7 +563,7 @@ class GhostWireServer:
             if target!=self.current_child_count:
                 self.current_child_count=target
                 try:
-                    self.control_queue.put_nowait(pack_child_cfg(self.current_child_count,self.key))
+                    self.control_queue.put_nowait(await pack_child_cfg(self.current_child_count,self.key))
                     logger.info(f"Pool scaled to {self.current_child_count} connections (queue={qsize}, active={active})")
                 except asyncio.QueueFull:
                     pass
@@ -604,7 +604,7 @@ class GhostWireServer:
                         self.conn_channel_map[conn_id]=selected_child
                         channel_id=selected_child
             self.udp_sessions[key]=(conn_id,time.time(),channel_id)
-            connect_msg=pack_connect_udp(conn_id,remote_ip,remote_port,self.key)
+            connect_msg=await pack_connect_udp(conn_id,remote_ip,remote_port,self.key)
             try:
                 control_queue.put_nowait(connect_msg)
             except (asyncio.QueueFull,AttributeError):
@@ -615,7 +615,7 @@ class GhostWireServer:
         send_queue=self.get_send_queue_for_channel(channel_id)
         if not send_queue:
             return
-        message=pack_data(conn_id,data,self.key)
+        message=await pack_data(conn_id,data,self.key)
         try:
             send_queue.put_nowait(message)
         except asyncio.QueueFull:
@@ -631,7 +631,7 @@ class GhostWireServer:
                 send_queue=self.get_send_queue_for_channel(channel_id)
                 if send_queue and self.key:
                     try:
-                        send_queue.put_nowait(pack_close(conn_id,0,self.key))
+                        send_queue.put_nowait(await pack_close(conn_id,0,self.key))
                     except asyncio.QueueFull:
                         pass
                 self.conn_channel_map.pop(conn_id,None)
@@ -665,13 +665,13 @@ class GhostWireServer:
             logger.info(f"UDP raw client connected from {session.remote_address}")
             async for message in session:
                 self.last_ping_time=time.time()
-                msg_type,conn_id,payload,_=unpack_message(message,self.key)
+                msg_type,conn_id,payload,_=await unpack_message(message,self.key)
                 if msg_type in (MSG_DATA,MSG_DATA_SEQ,MSG_CLOSE,MSG_CLOSE_SEQ,MSG_ERROR,MSG_INFO):
                     await self.route_message(msg_type,conn_id,payload)
                 elif msg_type==MSG_PING:
                     timestamp=struct.unpack("!Q",payload)[0]
                     try:
-                        control_queue.put_nowait(pack_pong(timestamp,self.key))
+                        control_queue.put_nowait(await pack_pong(timestamp,self.key))
                     except asyncio.QueueFull:
                         pass
         except ConnectionError:
@@ -739,7 +739,7 @@ class GhostWireServer:
                 writer.close()
                 await writer.wait_closed()
                 return
-            connect_msg=pack_connect(conn_id,remote_ip,remote_port,self.key)
+            connect_msg=await pack_connect(conn_id,remote_ip,remote_port,self.key)
             try:
                 control_queue.put_nowait(connect_msg)
             except (asyncio.QueueFull,AttributeError):
@@ -772,9 +772,9 @@ class GhostWireServer:
                 use_seq=conn_id in self.conn_data_seq_enabled or self.should_stripe_data()
                 if use_seq:
                     self.conn_data_seq_enabled.add(conn_id)
-                    message=pack_data_seq(conn_id,self.next_data_seq(conn_id),data,self.key)
+                    message=await pack_data_seq(conn_id,self.next_data_seq(conn_id),data,self.key)
                 else:
-                    message=pack_data(conn_id,data,self.key)
+                    message=await pack_data(conn_id,data,self.key)
                 try:
                     send_queue.put_nowait(message)
                 except asyncio.QueueFull:
@@ -799,11 +799,11 @@ class GhostWireServer:
                             send_queue=channel.get("send_queue")
                 if self.websocket and send_queue:
                     if conn_id in self.conn_data_seq_enabled:
-                        send_queue.put_nowait(pack_close_seq(conn_id,self.conn_data_tx_seq.get(conn_id,0),0,self.key))
+                        send_queue.put_nowait(await pack_close_seq(conn_id,self.conn_data_tx_seq.get(conn_id,0),0,self.key))
                     else:
-                        send_queue.put_nowait(pack_close(conn_id,0,self.key))
+                        send_queue.put_nowait(await pack_close(conn_id,0,self.key))
                 elif self.websocket and control_queue:
-                    control_queue.put_nowait(pack_close(conn_id,0,self.key))
+                    control_queue.put_nowait(await pack_close(conn_id,0,self.key))
             except:
                 pass
             self.conn_channel_map.pop(conn_id,None)

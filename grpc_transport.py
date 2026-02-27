@@ -47,7 +47,7 @@ class GrpcTunnelServicer(TunnelBase):
             if len(auth_data)<9:
                 logger.warning(f"Incomplete auth from {peer}")
                 return
-            msg_type,conn_id,encrypted_token,_=unpack_message(auth_data,None)
+            msg_type,conn_id,encrypted_token,_=await unpack_message(auth_data,None)
             if msg_type!=MSG_AUTH:
                 logger.warning(f"Expected AUTH message from {peer}")
                 return
@@ -68,7 +68,7 @@ class GrpcTunnelServicer(TunnelBase):
                 logger.warning(f"Invalid client public key message from {peer}")
                 return
             try:
-                key_msg_type,_,client_pubkey_bytes,_=unpack_message(client_pubkey_data,None)
+                key_msg_type,_,client_pubkey_bytes,_=await unpack_message(client_pubkey_data,None)
                 if key_msg_type!=MSG_PUBKEY:
                     logger.warning(f"Expected client public key message from {peer}")
                     return
@@ -100,7 +100,7 @@ class GrpcTunnelServicer(TunnelBase):
                 buffer.extend(msg.data)
                 while len(buffer)>=9:
                     try:
-                        msg_type,conn_id,payload,consumed=unpack_message(buffer,key)
+                        msg_type,conn_id,payload,consumed=await unpack_message(buffer,key)
                         del buffer[:consumed]
                     except ValueError:
                         break
@@ -109,7 +109,7 @@ class GrpcTunnelServicer(TunnelBase):
                     elif msg_type==MSG_PING:
                         timestamp=struct.unpack("!Q",payload)[0]
                         try:
-                            control_queue.put_nowait(pack_pong(timestamp,key))
+                            control_queue.put_nowait(await pack_pong(timestamp,key))
                         except asyncio.QueueFull:
                             logger.warning("gRPC control queue full, dropping PONG")
                     elif msg_type==MSG_PONG:
@@ -247,7 +247,7 @@ class GrpcClientTransport:
             pubkey_data=pubkey_msg.data
             if len(pubkey_data)<9:
                 raise ValueError("Invalid public key message")
-            msg_type,_,pubkey_bytes,_=unpack_message(pubkey_data,None)
+            msg_type,_,pubkey_bytes,_=await unpack_message(pubkey_data,None)
             if msg_type!=MSG_PUBKEY:
                 raise ValueError("Expected public key from server")
             server_public_key=deserialize_public_key(pubkey_bytes)
@@ -264,7 +264,7 @@ class GrpcClientTransport:
             session_data=session_msg.data
             if len(session_data)<9:
                 raise ValueError("Invalid session key message")
-            session_type,_,session_payload,_=unpack_message(session_data,None)
+            session_type,_,session_payload,_=await unpack_message(session_data,None)
             if session_type!=MSG_SESSION_KEY:
                 raise ValueError("Expected session key from server")
             self.key=unpack_session_key(session_payload,client_private_key)

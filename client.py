@@ -139,7 +139,7 @@ class GhostWireClient:
             logger.error(f"Failed to open UDP to {remote_ip}:{remote_port}: {e}")
             self.preconnect_buffers.pop(conn_id,None)
             self.clear_conn_data_state(conn_id)
-            error_msg=pack_error(conn_id,str(e),self.key)
+            error_msg=await pack_error(conn_id,str(e),self.key)
             try:
                 if self.control_queue:
                     self.control_queue.put_nowait(error_msg)
@@ -160,7 +160,7 @@ class GhostWireClient:
                 send_queue=channel.get("send_queue") if channel else None
                 if not send_queue:
                     break
-                message=pack_data(conn_id,data,self.key)
+                message=await pack_data(conn_id,data,self.key)
                 try:
                     send_queue.put_nowait(message)
                 except asyncio.QueueFull:
@@ -173,7 +173,7 @@ class GhostWireClient:
                 channel=self.get_channel(channel_id)
                 control_queue=channel.get("control_queue") if channel else None
                 if control_queue:
-                    control_queue.put_nowait(pack_close(conn_id,0,self.key))
+                    control_queue.put_nowait(await pack_close(conn_id,0,self.key))
             except:
                 pass
             self.conn_channel_map.pop(conn_id,None)
@@ -454,7 +454,7 @@ class GhostWireClient:
                 buffer.extend(msg_data)
                 while len(buffer)>=9:
                     try:
-                        msg_type,conn_id,payload,consumed=unpack_message(buffer,self.key)
+                        msg_type,conn_id,payload,consumed=await unpack_message(buffer,self.key)
                         del buffer[:consumed]
                     except ValueError:
                         break
@@ -488,7 +488,7 @@ class GhostWireClient:
                             channel=self.get_channel(channel_id)
                             control_queue=channel.get("control_queue") if channel else None
                             if control_queue:
-                                control_queue.put_nowait(pack_pong(timestamp,self.key))
+                                control_queue.put_nowait(await pack_pong(timestamp,self.key))
                         except (asyncio.QueueFull,AttributeError):
                             pass
                     elif msg_type==MSG_PONG:
@@ -509,7 +509,7 @@ class GhostWireClient:
                     self.last_ping_time=time.time()
                     self.last_rx_time=time.time()
                 msg_data=await transport.recv()
-                msg_type,conn_id,payload,_=unpack_message(msg_data,self.key)
+                msg_type,conn_id,payload,_=await unpack_message(msg_data,self.key)
                 if msg_type==MSG_CONNECT:
                     remote_ip,remote_port=unpack_connect(payload)
                     self.conn_channel_map[conn_id]=channel_id
@@ -540,7 +540,7 @@ class GhostWireClient:
                         channel=self.get_channel(channel_id)
                         control_queue=channel.get("control_queue") if channel else None
                         if control_queue:
-                            control_queue.put_nowait(pack_pong(timestamp,self.key))
+                            control_queue.put_nowait(await pack_pong(timestamp,self.key))
                     except (asyncio.QueueFull,AttributeError):
                         pass
                 elif msg_type==MSG_PONG:
@@ -659,7 +659,7 @@ class GhostWireClient:
                 self.last_ping_time=time.time()
                 self.last_pong_time=time.time()
                 self.last_rx_time=time.time()
-                info_msg=pack_info(self.updater.current_version,self.key)
+                info_msg=await pack_info(self.updater.current_version,self.key)
                 await self.http2_transport.send(info_msg)
                 self.reconnect_delay=self.config.initial_delay
                 return True
@@ -673,7 +673,7 @@ class GhostWireClient:
                 self.last_ping_time=time.time()
                 self.last_pong_time=time.time()
                 self.last_rx_time=time.time()
-                info_msg=pack_info(self.updater.current_version,self.key)
+                info_msg=await pack_info(self.updater.current_version,self.key)
                 await self.grpc_transport.send(info_msg)
                 self.reconnect_delay=self.config.initial_delay
                 return True
@@ -700,7 +700,7 @@ class GhostWireClient:
                 pubkey_msg=await asyncio.wait_for(self.main_websocket.recv(),timeout=10)
                 if len(pubkey_msg)<9:
                     raise ValueError("Invalid public key message")
-                msg_type,_,pubkey_bytes,_=unpack_message(pubkey_msg,None)
+                msg_type,_,pubkey_bytes,_=await unpack_message(pubkey_msg,None)
                 if msg_type!=MSG_PUBKEY:
                     raise ValueError("Expected public key from server")
                 server_public_key=deserialize_public_key(pubkey_bytes)
@@ -709,7 +709,7 @@ class GhostWireClient:
                 await self.main_websocket.send(auth_msg)
                 await self.main_websocket.send(pack_pubkey(client_public_key))
                 session_msg=await asyncio.wait_for(self.main_websocket.recv(),timeout=10)
-                session_type,_,session_payload,_=unpack_message(session_msg,None)
+                session_type,_,session_payload,_=await unpack_message(session_msg,None)
                 if session_type!=MSG_SESSION_KEY:
                     raise ValueError("Expected session key from server")
                 self.key=unpack_session_key(session_payload,client_private_key)
@@ -717,7 +717,7 @@ class GhostWireClient:
                 self.last_pong_time=time.time()
                 self.last_rx_time=time.time()
                 logger.info("Connected and authenticated to server")
-                info_msg=pack_info(self.updater.current_version,self.key)
+                info_msg=await pack_info(self.updater.current_version,self.key)
                 await self.main_websocket.send(info_msg)
                 self.reconnect_delay=self.config.initial_delay
                 return True
@@ -729,7 +729,7 @@ class GhostWireClient:
                 pubkey_msg=await asyncio.wait_for(self.main_websocket.recv(),timeout=10)
                 if len(pubkey_msg)<9:
                     raise ValueError("Invalid public key message")
-                msg_type,_,pubkey_bytes,_=unpack_message(pubkey_msg,None)
+                msg_type,_,pubkey_bytes,_=await unpack_message(pubkey_msg,None)
                 if msg_type!=MSG_PUBKEY:
                     raise ValueError("Expected public key from server")
                 server_public_key=deserialize_public_key(pubkey_bytes)
@@ -738,7 +738,7 @@ class GhostWireClient:
                 await self.main_websocket.send(auth_msg)
                 await self.main_websocket.send(pack_pubkey(client_public_key))
                 session_msg=await asyncio.wait_for(self.main_websocket.recv(),timeout=10)
-                session_type,_,session_payload,_=unpack_message(session_msg,None)
+                session_type,_,session_payload,_=await unpack_message(session_msg,None)
                 if session_type!=MSG_SESSION_KEY:
                     raise ValueError("Expected session key from server")
                 self.key=unpack_session_key(session_payload,client_private_key)
@@ -746,7 +746,7 @@ class GhostWireClient:
                 self.last_pong_time=time.time()
                 self.last_rx_time=time.time()
                 logger.info("Connected and authenticated to server")
-                info_msg=pack_info(self.updater.current_version,self.key)
+                info_msg=await pack_info(self.updater.current_version,self.key)
                 await self.main_websocket.send(info_msg)
                 self.reconnect_delay=self.config.initial_delay
                 return True
@@ -785,7 +785,7 @@ class GhostWireClient:
             pubkey_msg=await asyncio.wait_for(ws.recv(),timeout=10)
             if len(pubkey_msg)<9:
                 raise ValueError("Invalid child public key message")
-            msg_type,_,pubkey_bytes,_=unpack_message(pubkey_msg,None)
+            msg_type,_,pubkey_bytes,_=await unpack_message(pubkey_msg,None)
             if msg_type!=MSG_PUBKEY:
                 raise ValueError("Expected public key from server")
             server_public_key=deserialize_public_key(pubkey_bytes)
@@ -819,7 +819,7 @@ class GhostWireClient:
             logger.error(f"Failed to connect to {remote_ip}:{remote_port}: {e}")
             self.preconnect_buffers.pop(conn_id,None)
             self.clear_conn_data_state(conn_id)
-            error_msg=pack_error(conn_id,str(e),self.key)
+            error_msg=await pack_error(conn_id,str(e),self.key)
             try:
                 if self.control_queue:
                     self.control_queue.put_nowait(error_msg)
@@ -841,9 +841,9 @@ class GhostWireClient:
                 use_seq=conn_id in self.conn_data_seq_enabled or self.should_stripe_data()
                 if use_seq:
                     self.conn_data_seq_enabled.add(conn_id)
-                    message=pack_data_seq(conn_id,self.next_data_seq(conn_id),data,self.key)
+                    message=await pack_data_seq(conn_id,self.next_data_seq(conn_id),data,self.key)
                 else:
-                    message=pack_data(conn_id,data,self.key)
+                    message=await pack_data(conn_id,data,self.key)
                 try:
                     send_queue.put_nowait(message)
                 except asyncio.QueueFull:
@@ -862,11 +862,11 @@ class GhostWireClient:
                 send_queue=channel.get("send_queue") if channel else None
                 if send_queue:
                     if conn_id in self.conn_data_seq_enabled:
-                        send_queue.put_nowait(pack_close_seq(conn_id,self.conn_data_tx_seq.get(conn_id,0),0,self.key))
+                        send_queue.put_nowait(await pack_close_seq(conn_id,self.conn_data_tx_seq.get(conn_id,0),0,self.key))
                     else:
-                        send_queue.put_nowait(pack_close(conn_id,0,self.key))
+                        send_queue.put_nowait(await pack_close(conn_id,0,self.key))
                 elif control_queue:
-                    control_queue.put_nowait(pack_close(conn_id,0,self.key))
+                    control_queue.put_nowait(await pack_close(conn_id,0,self.key))
             except:
                 pass
             self.conn_channel_map.pop(conn_id,None)
@@ -883,7 +883,7 @@ class GhostWireClient:
                 buffer.extend(message)
                 while len(buffer)>=9:
                     try:
-                        msg_type,conn_id,payload,consumed=unpack_message(buffer,self.key)
+                        msg_type,conn_id,payload,consumed=await unpack_message(buffer,self.key)
                         del buffer[:consumed]
                     except ValueError:
                         break
@@ -918,7 +918,7 @@ class GhostWireClient:
                             channel=self.get_channel(channel_id)
                             control_queue=channel.get("control_queue") if channel else None
                             if control_queue:
-                                control_queue.put_nowait(pack_pong(timestamp,self.key))
+                                control_queue.put_nowait(await pack_pong(timestamp,self.key))
                         except (asyncio.QueueFull,AttributeError):
                             pass
                     elif msg_type==MSG_PONG:
@@ -993,7 +993,7 @@ class GhostWireClient:
                     timestamp=int(time.time()*1000)
                     if self.main_control_queue:
                         try:
-                            self.main_control_queue.put_nowait(pack_ping(timestamp,self.key))
+                            self.main_control_queue.put_nowait(await pack_ping(timestamp,self.key))
                         except (asyncio.QueueFull,AttributeError):
                             logger.warning(f"Control queue unavailable, skipping ping")
                     for _,channel in list(self.child_channels.items()):
@@ -1001,7 +1001,7 @@ class GhostWireClient:
                         if not control_queue:
                             continue
                         try:
-                            control_queue.put_nowait(pack_ping(timestamp,self.key))
+                            control_queue.put_nowait(await pack_ping(timestamp,self.key))
                         except (asyncio.QueueFull,AttributeError):
                             pass
             except Exception as e:

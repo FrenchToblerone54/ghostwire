@@ -85,7 +85,7 @@ class HTTP2ServerHandler:
                                     break
                                 msg_data=auth_buffer[4:4+msg_len]
                                 auth_buffer=auth_buffer[4+msg_len:]
-                                msg_type,_,payload,_=unpack_message(msg_data,None)
+                                msg_type,_,payload,_=await unpack_message(msg_data,None)
                                 if msg_type==MSG_AUTH:
                                     client_token=rsa_decrypt(self.private_key,payload)
                                     token_str,_,_=unpack_auth_payload(client_token)
@@ -119,12 +119,12 @@ class HTTP2ServerHandler:
                                     break
                                 msg_data=msg_buffer[4:4+msg_len]
                                 msg_buffer=msg_buffer[4+msg_len:]
-                                msg_type,conn_id,payload,_=unpack_message(msg_data,key)
+                                msg_type,conn_id,payload,_=await unpack_message(msg_data,key)
                                 if msg_type==MSG_INFO:
                                     self.server.client_version=payload.decode()
                                     logger.info(f"Client version: {self.server.client_version}")
                                 elif msg_type==MSG_PING:
-                                    pong_msg=pack_pong(struct.unpack("!Q",payload)[0],key)
+                                    pong_msg=await pack_pong(struct.unpack("!Q",payload)[0],key)
                                     try:
                                         send_queue.put_nowait(pong_msg)
                                     except asyncio.QueueFull:
@@ -195,7 +195,7 @@ class HTTP2ServerHandler:
             auth_len_data=await asyncio.wait_for(reader.readexactly(4),timeout=30)
             auth_len=struct.unpack("!I",auth_len_data)[0]
             auth_data=await asyncio.wait_for(reader.readexactly(auth_len),timeout=30)
-            auth_type,_,encrypted_token,_=unpack_message(auth_data,None)
+            auth_type,_,encrypted_token,_=await unpack_message(auth_data,None)
             if auth_type!=MSG_AUTH:
                 raise ValueError("Expected auth message")
             client_token=rsa_decrypt(self.private_key,encrypted_token)
@@ -205,7 +205,7 @@ class HTTP2ServerHandler:
             pubkey_len_data=await asyncio.wait_for(reader.readexactly(4),timeout=30)
             pubkey_len=struct.unpack("!I",pubkey_len_data)[0]
             pubkey_data=await asyncio.wait_for(reader.readexactly(pubkey_len),timeout=30)
-            pubkey_type,_,client_pubkey,_=unpack_message(pubkey_data,None)
+            pubkey_type,_,client_pubkey,_=await unpack_message(pubkey_data,None)
             if pubkey_type!=MSG_PUBKEY:
                 raise ValueError("Expected public key")
             client_public_key=deserialize_public_key(client_pubkey)
@@ -226,12 +226,12 @@ class HTTP2ServerHandler:
                 msg_len_data=await reader.readexactly(4)
                 msg_len=struct.unpack("!I",msg_len_data)[0]
                 msg_data=await reader.readexactly(msg_len)
-                msg_type,conn_id,payload,_=unpack_message(msg_data,key)
+                msg_type,conn_id,payload,_=await unpack_message(msg_data,key)
                 if msg_type==MSG_INFO:
                     self.server.client_version=payload.decode()
                     logger.info(f"Client version: {self.server.client_version}")
                 elif msg_type==MSG_PING:
-                    pong_msg=pack_pong(struct.unpack("!Q",payload)[0],key)
+                    pong_msg=await pack_pong(struct.unpack("!Q",payload)[0],key)
                     await send_queue.put(pong_msg)
                 elif msg_type==MSG_PONG:
                     last_ping_time[0]=time.time()
@@ -323,7 +323,7 @@ class HTTP2ServerHandler:
         try:
             while not stop_event.is_set():
                 await asyncio.sleep(interval)
-                ping_msg=pack_ping(int(time.time()*1000),key)
+                ping_msg=await pack_ping(int(time.time()*1000),key)
                 try:
                     send_queue.put_nowait(ping_msg)
                 except asyncio.QueueFull:
@@ -401,7 +401,7 @@ class HTTP2ClientTransport:
             server_msg_len_data=await asyncio.wait_for(self._read_exact(4),timeout=30)
             server_msg_len=struct.unpack("!I",server_msg_len_data)[0]
             server_msg_data=await asyncio.wait_for(self._read_exact(server_msg_len),timeout=30)
-            msg_type,_,server_pubkey,_=unpack_message(server_msg_data,None)
+            msg_type,_,server_pubkey,_=await unpack_message(server_msg_data,None)
             if msg_type!=MSG_PUBKEY:
                 raise ValueError("Expected public key from server")
             server_public_key=deserialize_public_key(server_pubkey)
@@ -417,7 +417,7 @@ class HTTP2ClientTransport:
             session_msg_len_data=await asyncio.wait_for(self._read_exact(4),timeout=30)
             session_msg_len=struct.unpack("!I",session_msg_len_data)[0]
             session_msg_data=await asyncio.wait_for(self._read_exact(session_msg_len),timeout=30)
-            session_type,_,session_payload,_=unpack_message(session_msg_data,None)
+            session_type,_,session_payload,_=await unpack_message(session_msg_data,None)
             if session_type!=MSG_SESSION_KEY:
                 raise ValueError("Expected session key from server")
             self.key=unpack_session_key(session_payload,client_private_key)
