@@ -954,7 +954,12 @@ def cmd_panel_configure():
 
 def main():
     if len(sys.argv)>=2 and sys.argv[1]=="update":
-        asyncio.run(Updater("server").manual_update())
+        config_path=next((sys.argv[i+1] for i,a in enumerate(sys.argv) if a in ("-c","--config") and i+1<len(sys.argv)),None)
+        if config_path:
+            cfg=ServerConfig(config_path)
+            asyncio.run(Updater("server",http_proxy=cfg.update_http_proxy,https_proxy=cfg.update_https_proxy).manual_update())
+        else:
+            asyncio.run(Updater("server").manual_update())
         sys.exit(0)
     if len(sys.argv)>=3 and sys.argv[1]=="panel" and sys.argv[2]=="configure":
         cmd_panel_configure()

@@ -1143,7 +1143,12 @@ def signal_handler(client,loop):
 
 def main():
     if len(sys.argv)>=2 and sys.argv[1]=="update":
-        asyncio.run(Updater("client").manual_update())
+        config_path=next((sys.argv[i+1] for i,a in enumerate(sys.argv) if a in ("-c","--config") and i+1<len(sys.argv)),None)
+        if config_path:
+            cfg=ClientConfig(config_path)
+            asyncio.run(Updater("client",http_proxy=cfg.update_http_proxy,https_proxy=cfg.update_https_proxy).manual_update())
+        else:
+            asyncio.run(Updater("client").manual_update())
         sys.exit(0)
     parser=argparse.ArgumentParser(description="GhostWire Client")
     parser.add_argument("-c","--config",help="Path to configuration file")
