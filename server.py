@@ -7,6 +7,9 @@ import time
 import struct
 import argparse
 import os
+import ssl
+import base64
+from urllib.parse import urlparse,unquote
 from protocol import *
 from config import ServerConfig
 from auth import validate_token
@@ -60,6 +63,7 @@ class GhostWireServer:
         self.conn_data_close_seq={}
         self.seq_timeout=30
         self.udp_sessions={}
+        self.preconnect_buffers={}
         self.io_chunk_size=262144
         self.writer_batch_bytes=262144
         self.ws_send_batch_bytes=config.ws_send_batch_bytes
@@ -68,6 +72,51 @@ class GhostWireServer:
         logger.info("Generating RSA key pair for secure authentication...")
         self.private_key,self.public_key=generate_rsa_keypair()
         self.updater=Updater("server",check_interval=config.update_check_interval,check_on_startup=config.update_check_on_startup,http_proxy=config.update_http_proxy,https_proxy=config.update_https_proxy)
+
+    def mode_is_server_listen(self):
+        return self.config.mode=="reverse"
+
+    def mode_is_client_connect(self):
+        return self.config.mode=="direct"
+
+    def pick_direct_proxy(self,remote_port):
+        if remote_port==443 and self.config.direct_https_proxy:
+            return self.config.direct_https_proxy
+        if self.config.direct_http_proxy:
+            return self.config.direct_http_proxy
+        return self.config.direct_https_proxy
+
+    async def connect_via_http_proxy(self,target_host,target_port,proxy_url,timeout=10):
+        parsed=urlparse(proxy_url)
+        proxy_host=parsed.hostname
+        if not proxy_host:
+            raise ValueError(f"Invalid direct proxy URL: {proxy_url}")
+        scheme=(parsed.scheme or "http").lower()
+        proxy_port=parsed.port or (443 if scheme=="https" else 80)
+        use_tls=scheme=="https"
+        if scheme not in ("http","https"):
+            raise ValueError(f"Unsupported direct proxy scheme: {scheme}")
+        ssl_ctx=ssl.create_default_context() if use_tls else None
+        reader,writer=await asyncio.wait_for(asyncio.open_connection(proxy_host,proxy_port,ssl=ssl_ctx,server_hostname=proxy_host if use_tls else None),timeout=timeout)
+        auth_header=""
+        if parsed.username is not None or parsed.password is not None:
+            username=unquote(parsed.username or "")
+            password=unquote(parsed.password or "")
+            token=base64.b64encode(f"{username}:{password}".encode()).decode()
+            auth_header=f"Proxy-Authorization: Basic {token}\r\n"
+        connect_req=f"CONNECT {target_host}:{target_port} HTTP/1.1\r\nHost: {target_host}:{target_port}\r\nProxy-Connection: Keep-Alive\r\n{auth_header}\r\n"
+        writer.write(connect_req.encode())
+        await asyncio.wait_for(writer.drain(),timeout=timeout)
+        response=await asyncio.wait_for(reader.readuntil(b"\r\n\r\n"),timeout=timeout)
+        status_line=response.split(b"\r\n",1)[0].decode(errors="ignore")
+        if " 200 " not in status_line:
+            writer.close()
+            try:
+                await writer.wait_closed()
+            except:
+                pass
+            raise ConnectionError(f"Direct proxy CONNECT failed: {status_line}")
+        return reader,writer
 
     def clear_conn_writers(self):
         for conn_id,task in list(self.conn_write_tasks.items()):
@@ -219,6 +268,7 @@ class GhostWireServer:
         return child_id
 
     def clear_conn_data_state(self,conn_id):
+        self.preconnect_buffers.pop(conn_id,None)
         self.conn_data_tx_seq.pop(conn_id,None)
         self.conn_data_seq_enabled.discard(conn_id)
         self.conn_data_rx_expected.pop(conn_id,None)
@@ -481,7 +531,7 @@ class GhostWireServer:
                     udp_cleanup=asyncio.create_task(self.udp_session_cleanup_loop())
                 else:
                     self.child_channels[child_id]={"ws":websocket,"send_queue":send_queue,"control_queue":control_queue,"stop_event":stop_event,"sender":sender}
-                if not self.listeners:
+                if not self.listeners and self.mode_is_server_listen():
                     await self.start_listeners()
             async for message in websocket:
                 if role=="main":
@@ -503,6 +553,14 @@ class GhostWireServer:
                             logger.warning(f"Control queue full, dropping PONG")
                     elif msg_type==MSG_PONG:
                         pass
+                    elif msg_type==MSG_CONNECT and self.mode_is_client_connect():
+                        remote_ip,remote_port=unpack_connect(payload)
+                        self.conn_channel_map[conn_id]="main"
+                        asyncio.create_task(self.handle_direct_connect(conn_id,remote_ip,remote_port))
+                    elif msg_type==MSG_CONNECT_UDP and self.mode_is_client_connect():
+                        remote_ip,remote_port=unpack_connect(payload)
+                        self.conn_channel_map[conn_id]="main"
+                        asyncio.create_task(self.handle_direct_connect_udp(conn_id,remote_ip,remote_port))
         except asyncio.TimeoutError:
             logger.warning(f"Client {client_id} authentication timeout")
         except ConnectionError:
@@ -637,34 +695,66 @@ class GhostWireServer:
                 self.conn_channel_map.pop(conn_id,None)
                 self.tunnel_manager.remove_connection(conn_id)
 
-    async def handle_udp_client(self,session):
-        if self.main_websocket is not None:
-            logger.warning(f"Rejecting UDP client from {session.remote_address}: main already connected")
+    async def handle_udp_client(self,session,role="main",child_id=""):
+        if role=="main":
+            if self.main_websocket is not None:
+                logger.warning(f"Rejecting UDP client from {session.remote_address}: main already connected")
+                return
+        elif role=="child":
+            if not self.config.ws_pool_enabled:
+                logger.warning(f"Rejecting UDP child from {session.remote_address}: child channels disabled")
+                return
+            if self.main_websocket is None:
+                logger.warning(f"Rejecting UDP child from {session.remote_address}: main not connected")
+                return
+            if not child_id:
+                logger.warning(f"Rejecting UDP child from {session.remote_address}: missing child id")
+                return
+            if self.key is None:
+                logger.warning(f"Rejecting UDP child from {session.remote_address}: missing main session key")
+                return
+        else:
+            logger.warning(f"Rejecting UDP client from {session.remote_address}: unknown role {role}")
             return
         sender=None
         ping_monitor=None
         seq_monitor=None
+        pool_monitor=None
         udp_cleanup=None
         send_queue=asyncio.Queue(maxsize=512)
         control_queue=asyncio.Queue(maxsize=256)
         stop_event=asyncio.Event()
-        self.last_ping_time=time.time()
+        if role=="main":
+            self.last_ping_time=time.time()
         try:
             sender=asyncio.create_task(self.sender_task(session,send_queue,control_queue,stop_event))
-            self.websocket=session
-            self.main_websocket=session
-            self.send_queue=send_queue
-            self.control_queue=control_queue
-            self.main_send_queue=send_queue
-            self.main_control_queue=control_queue
-            ping_monitor=asyncio.create_task(self.ping_monitor_loop())
-            seq_monitor=asyncio.create_task(self.sequence_timeout_monitor())
-            udp_cleanup=asyncio.create_task(self.udp_session_cleanup_loop())
-            if not self.listeners:
-                await self.start_listeners()
-            logger.info(f"UDP raw client connected from {session.remote_address}")
+            if role=="main":
+                self.websocket=session
+                self.main_websocket=session
+                self.send_queue=send_queue
+                self.control_queue=control_queue
+                self.main_send_queue=send_queue
+                self.main_control_queue=control_queue
+                ping_monitor=asyncio.create_task(self.ping_monitor_loop())
+                seq_monitor=asyncio.create_task(self.sequence_timeout_monitor())
+                if self.config.ws_pool_enabled:
+                    self.current_child_count=self.config.ws_pool_min
+                    try:
+                        control_queue.put_nowait(await pack_child_cfg(self.current_child_count,self.key))
+                    except asyncio.QueueFull:
+                        logger.warning("Main control queue full, child config dropped")
+                    pool_monitor=asyncio.create_task(self.pool_manager_loop())
+                udp_cleanup=asyncio.create_task(self.udp_session_cleanup_loop())
+                if not self.listeners and self.mode_is_server_listen():
+                    await self.start_listeners()
+                logger.info(f"UDP raw client connected from {session.remote_address}")
+            else:
+                self.child_channels[child_id]={"ws":session,"send_queue":send_queue,"control_queue":control_queue,"stop_event":stop_event,"sender":sender}
+                logger.info(f"UDP child connected from {session.remote_address} id={child_id}")
+            source_channel_id=child_id if role=="child" else "main"
             async for message in session:
-                self.last_ping_time=time.time()
+                if role=="main":
+                    self.last_ping_time=time.time()
                 msg_type,conn_id,payload,_=await unpack_message(message,self.key)
                 if msg_type in (MSG_DATA,MSG_DATA_SEQ,MSG_CLOSE,MSG_CLOSE_SEQ,MSG_ERROR,MSG_INFO):
                     await self.route_message(msg_type,conn_id,payload)
@@ -674,6 +764,14 @@ class GhostWireServer:
                         control_queue.put_nowait(await pack_pong(timestamp,self.key))
                     except asyncio.QueueFull:
                         pass
+                elif msg_type==MSG_CONNECT and self.mode_is_client_connect():
+                    remote_ip,remote_port=unpack_connect(payload)
+                    self.conn_channel_map[conn_id]=source_channel_id
+                    asyncio.create_task(self.handle_direct_connect(conn_id,remote_ip,remote_port))
+                elif msg_type==MSG_CONNECT_UDP and self.mode_is_client_connect():
+                    remote_ip,remote_port=unpack_connect(payload)
+                    self.conn_channel_map[conn_id]=source_channel_id
+                    asyncio.create_task(self.handle_direct_connect_udp(conn_id,remote_ip,remote_port))
         except ConnectionError:
             logger.info(f"UDP raw client disconnected from {session.remote_address}")
         except Exception as e:
@@ -689,19 +787,138 @@ class GhostWireServer:
                 ping_monitor.cancel()
             if seq_monitor:
                 seq_monitor.cancel()
+            if pool_monitor:
+                pool_monitor.cancel()
             if udp_cleanup:
                 udp_cleanup.cancel()
-            self.udp_sessions.clear()
-            await self.close_child_channels()
-            self.clear_conn_writers()
-            self.websocket=None
-            self.main_websocket=None
-            self.send_queue=None
-            self.control_queue=None
-            self.main_send_queue=None
-            self.main_control_queue=None
-            self.client_version=None
-            self.tunnel_manager.close_all()
+            if role=="main":
+                self.udp_sessions.clear()
+                await self.close_child_channels()
+                self.clear_conn_writers()
+                self.websocket=None
+                self.main_websocket=None
+                self.send_queue=None
+                self.control_queue=None
+                self.main_send_queue=None
+                self.main_control_queue=None
+                self.client_version=None
+                self.tunnel_manager.close_all()
+            elif role=="child":
+                self.child_channels.pop(child_id,None)
+                await self.close_connections_for_child(child_id)
+
+    async def handle_direct_connect(self,conn_id,remote_ip,remote_port):
+        try:
+            direct_proxy=self.pick_direct_proxy(remote_port)
+            if direct_proxy:
+                reader,writer=await self.connect_via_http_proxy(remote_ip,remote_port,direct_proxy,timeout=10)
+            else:
+                reader,writer=await asyncio.wait_for(asyncio.open_connection(remote_ip,remote_port),timeout=10)
+            self.tunnel_manager.add_connection(conn_id,(reader,writer))
+            queue=asyncio.Queue(maxsize=512)
+            self.conn_write_queues[conn_id]=queue
+            self.conn_write_tasks[conn_id]=asyncio.create_task(self.conn_writer_loop(conn_id,writer,queue))
+            for buffered in self.preconnect_buffers.pop(conn_id,[]):
+                try:
+                    queue.put_nowait(buffered)
+                except asyncio.QueueFull:
+                    break
+            asyncio.create_task(self.forward_direct_remote_to_ws(conn_id,reader))
+        except Exception as e:
+            logger.error(f"Direct connect failed to {remote_ip}:{remote_port}: {e}")
+            self.clear_conn_data_state(conn_id)
+            self.conn_channel_map.pop(conn_id,None)
+            error_msg=await pack_error(conn_id,str(e),self.key)
+            try:
+                if self.control_queue:
+                    self.control_queue.put_nowait(error_msg)
+            except (asyncio.QueueFull,AttributeError):
+                pass
+
+    async def forward_direct_remote_to_ws(self,conn_id,reader):
+        try:
+            while True:
+                data=await reader.read(self.io_chunk_size)
+                if not data:
+                    break
+                channel_id=self.pick_data_channel(conn_id)
+                send_queue=self.get_send_queue_for_channel(channel_id)
+                if not self.websocket or not send_queue:
+                    break
+                message=await pack_data(conn_id,data,self.key)
+                try:
+                    send_queue.put_nowait(message)
+                except asyncio.QueueFull:
+                    try:
+                        await asyncio.wait_for(send_queue.put(message),timeout=30)
+                    except asyncio.TimeoutError:
+                        logger.warning(f"Send queue stalled for {conn_id}, closing direct connection")
+                        break
+        except Exception as e:
+            logger.debug(f"Direct forward error for {conn_id}: {e}")
+        finally:
+            try:
+                if self.websocket and self.send_queue:
+                    self.send_queue.put_nowait(await pack_close(conn_id,0,self.key))
+                elif self.websocket and self.control_queue:
+                    self.control_queue.put_nowait(await pack_close(conn_id,0,self.key))
+            except:
+                pass
+            self.conn_channel_map.pop(conn_id,None)
+            self.clear_conn_data_state(conn_id)
+            self.tunnel_manager.remove_connection(conn_id)
+
+    async def handle_direct_connect_udp(self,conn_id,remote_ip,remote_port):
+        recv_queue=asyncio.Queue(maxsize=512)
+        try:
+            from udp_transport import _UDPDataProtocol as UDPDataProtocol
+            loop=asyncio.get_event_loop()
+            transport,_=await loop.create_datagram_endpoint(
+                lambda:UDPDataProtocol(recv_queue),
+                remote_addr=(remote_ip,remote_port)
+            )
+            writer=UDPWriterAdapter(transport)
+            self.tunnel_manager.add_connection(conn_id,(None,writer))
+            asyncio.create_task(self.forward_direct_udp_response(conn_id,recv_queue))
+        except Exception as e:
+            logger.error(f"Direct UDP connect failed to {remote_ip}:{remote_port}: {e}")
+            self.clear_conn_data_state(conn_id)
+            self.conn_channel_map.pop(conn_id,None)
+            error_msg=await pack_error(conn_id,str(e),self.key)
+            try:
+                if self.control_queue:
+                    self.control_queue.put_nowait(error_msg)
+            except (asyncio.QueueFull,AttributeError):
+                pass
+
+    async def forward_direct_udp_response(self,conn_id,recv_queue):
+        try:
+            while True:
+                try:
+                    data=await asyncio.wait_for(recv_queue.get(),timeout=30)
+                except asyncio.TimeoutError:
+                    break
+                if data is None:
+                    break
+                send_queue=self.get_send_queue_for_channel(self.pick_data_channel(conn_id))
+                if not send_queue:
+                    break
+                message=await pack_data(conn_id,data,self.key)
+                try:
+                    send_queue.put_nowait(message)
+                except asyncio.QueueFull:
+                    pass
+        except Exception as e:
+            logger.debug(f"Direct UDP response error for {conn_id}: {e}")
+        finally:
+            try:
+                if self.control_queue and self.key:
+                    self.control_queue.put_nowait(await pack_close(conn_id,0,self.key))
+            except:
+                pass
+            self.conn_channel_map.pop(conn_id,None)
+            self.clear_conn_data_state(conn_id)
+            self.tunnel_manager.remove_connection(conn_id)
 
     async def start_listeners(self):
         for local_ip,local_port,remote_ip,remote_port in self.config.port_mappings:
@@ -812,6 +1029,11 @@ class GhostWireServer:
 
     async def handle_data(self,conn_id,payload):
         connection=self.tunnel_manager.get_connection(conn_id)
+        if not connection:
+            buffer=self.preconnect_buffers.setdefault(conn_id,[])
+            if len(buffer)<16:
+                buffer.append(payload)
+            return
         if connection:
             _,writer=connection
             try:
@@ -831,6 +1053,7 @@ class GhostWireServer:
                 self.tunnel_manager.remove_connection(conn_id)
 
     async def handle_close(self,conn_id):
+        self.preconnect_buffers.pop(conn_id,None)
         logger.debug(f"CLOSE from client: {conn_id}")
         queue=self.conn_write_queues.get(conn_id)
         if queue:

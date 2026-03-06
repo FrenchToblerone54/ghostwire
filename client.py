@@ -7,8 +7,10 @@ import time
 import struct
 import argparse
 import random
+import ssl
+import base64
 import aiohttp
-from urllib.parse import urlparse
+from urllib.parse import urlparse,unquote
 from nanoid import generate
 from protocol import *
 from config import ClientConfig
@@ -37,6 +39,7 @@ class GhostWireClient:
         self.http2_transport=None
         self.grpc_transport=None
         self.udp_transport=None
+        self.direct_listeners=[]
         self.key=None
         self.running=False
         self.reconnect_delay=config.initial_delay
@@ -77,6 +80,50 @@ class GhostWireClient:
         self.ws_write_limit=4194304
         self.ws_max_queue=2048
         self.updater=Updater("client",check_interval=config.update_check_interval,check_on_startup=config.update_check_on_startup,http_proxy=config.update_http_proxy,https_proxy=config.update_https_proxy)
+
+    def mode_accept_remote_connect(self):
+        return self.config.mode=="reverse"
+
+    def pick_direct_proxy(self,remote_port):
+        if self.config.mode!="direct":
+            return ""
+        if remote_port==443 and self.config.direct_https_proxy:
+            return self.config.direct_https_proxy
+        if self.config.direct_http_proxy:
+            return self.config.direct_http_proxy
+        return self.config.direct_https_proxy
+
+    async def connect_via_http_proxy(self,target_host,target_port,proxy_url,timeout=10):
+        parsed=urlparse(proxy_url)
+        proxy_host=parsed.hostname
+        if not proxy_host:
+            raise ValueError(f"Invalid direct proxy URL: {proxy_url}")
+        scheme=(parsed.scheme or "http").lower()
+        proxy_port=parsed.port or (443 if scheme=="https" else 80)
+        use_tls=scheme=="https"
+        if scheme not in ("http","https"):
+            raise ValueError(f"Unsupported direct proxy scheme: {scheme}")
+        ssl_ctx=ssl.create_default_context() if use_tls else None
+        reader,writer=await asyncio.wait_for(asyncio.open_connection(proxy_host,proxy_port,ssl=ssl_ctx,server_hostname=proxy_host if use_tls else None),timeout=timeout)
+        auth_header=""
+        if parsed.username is not None or parsed.password is not None:
+            username=unquote(parsed.username or "")
+            password=unquote(parsed.password or "")
+            token=base64.b64encode(f"{username}:{password}".encode()).decode()
+            auth_header=f"Proxy-Authorization: Basic {token}\r\n"
+        connect_req=f"CONNECT {target_host}:{target_port} HTTP/1.1\r\nHost: {target_host}:{target_port}\r\nProxy-Connection: Keep-Alive\r\n{auth_header}\r\n"
+        writer.write(connect_req.encode())
+        await asyncio.wait_for(writer.drain(),timeout=timeout)
+        response=await asyncio.wait_for(reader.readuntil(b"\r\n\r\n"),timeout=timeout)
+        status_line=response.split(b"\r\n",1)[0].decode(errors="ignore")
+        if " 200 " not in status_line:
+            writer.close()
+            try:
+                await writer.wait_closed()
+            except:
+                pass
+            raise ConnectionError(f"Direct proxy CONNECT failed: {status_line}")
+        return reader,writer
 
     def clear_conn_writers(self):
         for conn_id,task in list(self.conn_write_tasks.items()):
@@ -352,6 +399,13 @@ class GhostWireClient:
                 return min(child_ids,key=lambda cid: self.child_channels[cid]["send_queue"].qsize() if self.child_channels.get(cid) and self.child_channels[cid].get("send_queue") else float("inf"))
         return self.conn_channel_map.get(conn_id,"main")
 
+    def pick_control_channel(self):
+        if self.config.ws_pool_enabled and self.config.protocol in ("websocket","aiohttp-ws"):
+            child_ids=self.get_available_child_ids()
+            if child_ids:
+                return min(child_ids,key=lambda cid:self.child_channels[cid]["control_queue"].qsize() if self.child_channels.get(cid) and self.child_channels[cid].get("control_queue") else float("inf"))
+        return "main"
+
     async def maybe_finalize_close_seq(self,conn_id):
         close_state=self.conn_data_close_seq.get(conn_id)
         if not close_state:
@@ -442,9 +496,9 @@ class GhostWireClient:
         buffer=bytearray()
         try:
             while transport.connected:
+                self.last_rx_time=time.time()
                 if channel_id=="main":
                     self.last_ping_time=time.time()
-                    self.last_rx_time=time.time()
                 try:
                     msg_data=await transport.recv()
                     if not msg_data:
@@ -458,12 +512,12 @@ class GhostWireClient:
                         del buffer[:consumed]
                     except ValueError:
                         break
-                    if msg_type==MSG_CONNECT:
+                    if msg_type==MSG_CONNECT and self.mode_accept_remote_connect():
                         remote_ip,remote_port=unpack_connect(payload)
                         self.conn_channel_map[conn_id]=channel_id
                         logger.debug(f"Routing connection {conn_id} via {channel_id}")
                         self.spawn_connect_task(conn_id,remote_ip,remote_port)
-                    elif msg_type==MSG_CONNECT_UDP:
+                    elif msg_type==MSG_CONNECT_UDP and self.mode_accept_remote_connect():
                         remote_ip,remote_port=unpack_connect(payload)
                         self.conn_channel_map[conn_id]=channel_id
                         self.spawn_connect_udp_task(conn_id,remote_ip,remote_port)
@@ -505,17 +559,17 @@ class GhostWireClient:
     async def http2_receive_messages(self,transport,channel_id):
         try:
             while transport.connected:
+                self.last_rx_time=time.time()
                 if channel_id=="main":
                     self.last_ping_time=time.time()
-                    self.last_rx_time=time.time()
                 msg_data=await transport.recv()
                 msg_type,conn_id,payload,_=await unpack_message(msg_data,self.key)
-                if msg_type==MSG_CONNECT:
+                if msg_type==MSG_CONNECT and self.mode_accept_remote_connect():
                     remote_ip,remote_port=unpack_connect(payload)
                     self.conn_channel_map[conn_id]=channel_id
                     logger.debug(f"Routing connection {conn_id} via {channel_id}")
                     self.spawn_connect_task(conn_id,remote_ip,remote_port)
-                elif msg_type==MSG_CONNECT_UDP:
+                elif msg_type==MSG_CONNECT_UDP and self.mode_accept_remote_connect():
                     remote_ip,remote_port=unpack_connect(payload)
                     self.conn_channel_map[conn_id]=channel_id
                     self.spawn_connect_udp_task(conn_id,remote_ip,remote_port)
@@ -809,7 +863,11 @@ class GhostWireClient:
             async with self.connect_semaphore:
                 channel_id=self.conn_channel_map.get(conn_id,"main")
                 logger.debug(f"CONNECT request: {conn_id} -> {remote_ip}:{remote_port} via {channel_id}")
-                reader,writer=await asyncio.wait_for(asyncio.open_connection(remote_ip,remote_port),timeout=10)
+                direct_proxy=self.pick_direct_proxy(remote_port)
+                if direct_proxy:
+                    reader,writer=await self.connect_via_http_proxy(remote_ip,remote_port,direct_proxy,timeout=10)
+                else:
+                    reader,writer=await asyncio.wait_for(asyncio.open_connection(remote_ip,remote_port),timeout=10)
             self.tunnel_manager.add_connection(conn_id,(reader,writer))
             buffered=self.preconnect_buffers.pop(conn_id,[])
             for payload in buffered:
@@ -877,9 +935,9 @@ class GhostWireClient:
         buffer=bytearray()
         try:
             async for message in websocket:
+                self.last_rx_time=time.time()
                 if channel_id=="main":
                     self.last_ping_time=time.time()
-                    self.last_rx_time=time.time()
                 buffer.extend(message)
                 while len(buffer)>=9:
                     try:
@@ -887,12 +945,12 @@ class GhostWireClient:
                         del buffer[:consumed]
                     except ValueError:
                         break
-                    if msg_type==MSG_CONNECT:
+                    if msg_type==MSG_CONNECT and self.mode_accept_remote_connect():
                         remote_ip,remote_port=unpack_connect(payload)
                         self.conn_channel_map[conn_id]=channel_id
                         logger.debug(f"Routing connection {conn_id} via {channel_id}")
                         self.spawn_connect_task(conn_id,remote_ip,remote_port)
-                    elif msg_type==MSG_CONNECT_UDP:
+                    elif msg_type==MSG_CONNECT_UDP and self.mode_accept_remote_connect():
                         remote_ip,remote_port=unpack_connect(payload)
                         self.conn_channel_map[conn_id]=channel_id
                         logger.debug(f"Routing UDP connection {conn_id} via {channel_id}")
@@ -1025,6 +1083,81 @@ class GhostWireClient:
                     await self.main_websocket.close()
                 break
 
+    async def start_direct_listeners(self):
+        for local_ip,local_port,remote_ip,remote_port in self.config.port_mappings:
+            server=await asyncio.start_server(
+                lambda r,w,rip=remote_ip,rport=remote_port:self.handle_direct_local_connection(r,w,rip,rport),
+                local_ip,local_port
+            )
+            self.direct_listeners.append(server)
+            logger.info(f"Direct listening on {local_ip}:{local_port} -> {remote_ip}:{remote_port}")
+
+    async def handle_direct_local_connection(self,reader,writer,remote_ip,remote_port):
+        conn_id=self.tunnel_manager.generate_conn_id()
+        self.tunnel_manager.add_connection(conn_id,(reader,writer))
+        logger.debug(f"New direct local connection {conn_id} -> {remote_ip}:{remote_port}")
+        try:
+            if not self.main_websocket:
+                logger.error(f"No server connected, dropping direct connection {conn_id}")
+                self.tunnel_manager.remove_connection(conn_id)
+                return
+            channel_id=self.pick_control_channel()
+            channel=self.get_channel(channel_id)
+            control_queue=channel.get("control_queue") if channel else None
+            if not control_queue:
+                logger.error(f"Control queue unavailable, dropping direct connection {conn_id}")
+                self.tunnel_manager.remove_connection(conn_id)
+                return
+            connect_msg=await pack_connect(conn_id,remote_ip,remote_port,self.key)
+            try:
+                control_queue.put_nowait(connect_msg)
+            except (asyncio.QueueFull,AttributeError):
+                logger.error(f"Control queue unavailable, dropping direct connection {conn_id}")
+                self.tunnel_manager.remove_connection(conn_id)
+                return
+            self.conn_channel_map[conn_id]=channel_id
+            asyncio.create_task(self.forward_direct_local_to_ws(conn_id,reader))
+        except Exception as e:
+            logger.error(f"Error sending direct CONNECT: {e}")
+            self.tunnel_manager.remove_connection(conn_id)
+
+    async def forward_direct_local_to_ws(self,conn_id,reader):
+        try:
+            while True:
+                data=await reader.read(self.io_chunk_size)
+                if not data:
+                    break
+                channel_id=self.pick_data_channel(conn_id)
+                channel=self.get_channel(channel_id)
+                send_queue=channel.get("send_queue") if channel else None
+                if not send_queue:
+                    break
+                message=await pack_data(conn_id,data,self.key)
+                try:
+                    send_queue.put_nowait(message)
+                except asyncio.QueueFull:
+                    try:
+                        await asyncio.wait_for(send_queue.put(message),timeout=30)
+                    except asyncio.TimeoutError:
+                        logger.warning(f"Send queue stalled for {conn_id}")
+                        break
+        except Exception as e:
+            logger.debug(f"Direct local forward error for {conn_id}: {e}")
+        finally:
+            try:
+                channel_id=self.conn_channel_map.get(conn_id,"main")
+                channel=self.get_channel(channel_id)
+                send_queue=channel.get("send_queue") if channel else None
+                if send_queue:
+                    send_queue.put_nowait(await pack_close(conn_id,0,self.key))
+                elif self.main_control_queue:
+                    self.main_control_queue.put_nowait(await pack_close(conn_id,0,self.key))
+            except:
+                pass
+            self.conn_channel_map.pop(conn_id,None)
+            self.clear_conn_data_state(conn_id)
+            self.tunnel_manager.remove_connection(conn_id)
+
     async def run(self):
         self.running=True
         update_task=None
@@ -1049,9 +1182,13 @@ class GhostWireClient:
                     elif self.config.protocol=="udp":
                         sender_task=asyncio.create_task(self.sender_task(self.udp_transport,send_queue,control_queue,stop_event))
                         receive_task=asyncio.create_task(self.receive_messages(self.udp_transport,"main"))
+                        if self.config.mode=="direct" and not self.direct_listeners:
+                            await self.start_direct_listeners()
                     else:
                         sender_task=asyncio.create_task(self.sender_task(self.main_websocket,send_queue,control_queue,stop_event))
                         receive_task=asyncio.create_task(self.receive_messages(self.main_websocket,"main"))
+                        if self.config.mode=="direct" and not self.direct_listeners:
+                            await self.start_direct_listeners()
                     self.channel_sender_tasks["main"]=sender_task
                     self.channel_stop_events["main"]=stop_event
                     ping_task=asyncio.create_task(self.ping_loop())

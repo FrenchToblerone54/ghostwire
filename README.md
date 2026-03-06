@@ -10,6 +10,7 @@ GhostWire is a WebSocket-based reverse tunnel system designed to help users in c
 - **RSA-encrypted authentication** - Token invisible to TLS-terminating proxies (CloudFlare-proof)
 - **End-to-end AES-256-GCM encryption** - All tunnel data encrypted with random 256-bit session keys
 - **Reverse tunnel architecture** - Client connects TO server (bypasses outbound blocking)
+- **Mode selection** - `reverse` (default) and `direct`
 - **Bidirectional streaming** - Single persistent connection over TLS
 - **Flexible TCP port forwarding** - Port ranges, IP binding, custom mappings
 - **Built-in heartbeat** - Transport and application-layer keepalive
@@ -94,6 +95,29 @@ Designed for scenarios where **censored countries block outbound connections** t
 
 **CloudFlare/DNS:** Points to **Iran server IP** (where WebSocket server listens for client connections)
 
+## Modes and Use Cases
+
+GhostWire now supports:
+
+- `mode="reverse"` (default)
+- `mode="direct"`
+
+### Behavior Matrix
+
+- `reverse`: server listens on `[tunnels]`, client connects out and dials remote targets
+- `direct`: client listens on `[tunnels]`, server dials remote targets
+
+### Your Two Scenarios
+
+- Host website on your own computer (client side) and expose it from server public IP/domain: use `mode="reverse"` (server-side `[tunnels]`).
+- Connect to a VPN that is running on the server side through GhostWire encryption: use `mode="direct"` (client-side `[tunnels]`).
+
+### WebSocket Pool in Direct Modes
+
+- WebSocket pool (`ws_pool_enabled`, `ws_pool_children`, `ws_pool_min`) works in direct mode too.
+- In `direct`, pool channels are used by client-side direct listeners.
+- Scope: pool applies to WebSocket transports (`protocol="websocket"` and `protocol="aiohttp-ws"`), not HTTP/2 or gRPC.
+
 ## Port Mapping Syntax
 
 The server supports flexible port mapping configurations (server listens, client connects):
@@ -122,10 +146,13 @@ ports=[
 protocol="websocket"       # "websocket" (default), "http2", or "grpc"
 listen_host="0.0.0.0"
 listen_port=8443
+mode="reverse"             # "reverse" (default) or "direct"
 listen_backlog=4096        # TCP listen queue depth
 websocket_path="/ws"       # Only used for websocket protocol
 ping_interval=30           # Application-level ping interval (seconds)
 ping_timeout=60            # Connection timeout (seconds)
+direct_http_proxy=""       # optional: proxy for direct-mode outbound CONNECT
+direct_https_proxy=""      # optional: proxy for direct-mode outbound CONNECT
 ws_pool_enabled=true       # Enable child channel pooling (default: true)
 ws_pool_children=8         # Max child channels (default: 8)
 ws_pool_min=2              # Min always-connected channels (default: 2)
@@ -197,8 +224,11 @@ For web browsing with hundreds of concurrent connections (typical modern website
 protocol="websocket"       # "websocket" (default), "http2", or "grpc"
 url="wss://tunnel.example.com/ws"  # Use wss:// for websocket, https:// for http2/grpc
 token="V1StGXR8_Z5jdHi6B-my"
+mode="reverse"             # must match server mode
 ping_interval=30           # Application-level ping interval (seconds)
 ping_timeout=60            # Connection timeout (seconds)
+direct_http_proxy=""       # optional
+direct_https_proxy=""      # optional
 ws_send_batch_bytes=65536  # Max bytes per WebSocket frame (default: 65536)
 auto_update=true
 update_check_interval=300
@@ -215,6 +245,9 @@ ips=[]
 host=""
 check_interval=300
 max_connection_time=1740
+
+[tunnels]
+ports=[]                   # set on listener side for chosen mode
 
 [logging]
 level="info"
@@ -239,6 +272,19 @@ update_https_proxy="http://127.0.0.1:8080"
 ```
 
 These proxy settings **only affect auto-update downloads** from GitHub. They do not affect tunnel traffic. Leave empty (or omit) if no proxy is needed.
+
+### HTTP/HTTPS Proxy for Direct Mode Tunnel Traffic
+
+For `mode="direct"`, outbound target connections can be routed through an HTTP proxy using CONNECT:
+
+```toml
+direct_http_proxy="http://127.0.0.1:8080"
+direct_https_proxy="http://127.0.0.1:8080"
+```
+
+- `direct_https_proxy` is preferred for destination port `443`
+- `direct_http_proxy` is used for other ports (or as fallback)
+- Supports proxy auth in URL form: `http://user:pass@proxy:8080`
 
 ## Protocol Options
 
