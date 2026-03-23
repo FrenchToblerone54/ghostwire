@@ -89,8 +89,8 @@ class ServerConfig:
         self.update_check_on_startup=config["server"].get("update_check_on_startup",True)
         self.update_http_proxy=config["server"].get("update_http_proxy","")
         self.update_https_proxy=config["server"].get("update_https_proxy","")
-        self.direct_http_proxy=config["server"].get("direct_http_proxy","")
-        self.direct_https_proxy=config["server"].get("direct_https_proxy","")
+        self.http_proxy=config["server"].get("http_proxy",config["server"].get("direct_http_proxy",""))
+        self.https_proxy=config["server"].get("https_proxy",config["server"].get("direct_https_proxy",""))
         self.panel_enabled=config.get("panel",{}).get("enabled",False)
         self.panel_host=config.get("panel",{}).get("host","127.0.0.1")
         self.panel_port=config.get("panel",{}).get("port",9090)
@@ -98,6 +98,7 @@ class ServerConfig:
         self.panel_threads=config.get("panel",{}).get("threads",4)
         self.ssl_cert=config["server"].get("ssl_cert","")
         self.ssl_key=config["server"].get("ssl_key","")
+        self.service_name=config["server"].get("service_name","ghostwire-server")
 
 class ClientConfig:
     def __init__(self,config_path):
@@ -130,8 +131,11 @@ class ClientConfig:
         self.update_check_on_startup=config["server"].get("update_check_on_startup",True)
         self.update_http_proxy=config["server"].get("update_http_proxy","")
         self.update_https_proxy=config["server"].get("update_https_proxy","")
-        self.direct_http_proxy=config["server"].get("direct_http_proxy","")
-        self.direct_https_proxy=config["server"].get("direct_https_proxy","")
+        self.http_proxy=config["server"].get("http_proxy",config["server"].get("direct_http_proxy",""))
+        self.https_proxy=config["server"].get("https_proxy",config["server"].get("direct_https_proxy",""))
         self.mode=config["server"].get("mode","reverse")
         self.direct_mode=config["server"].get("direct_mode","to_server")
         self.port_mappings=parse_port_mappings(config.get("tunnels",{}).get("ports",[]))
+        self.allow_insecure=config["server"].get("allow_insecure",False)
+        self.resolve_ip=config["server"].get("resolve_ip","")
+        self.service_name=config["server"].get("service_name","ghostwire-client")

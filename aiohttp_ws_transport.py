@@ -107,4 +107,7 @@ async def start_aiohttp_ws_server(ghost_server):
     await site.start()
     logger.info(f"aiohttp WebSocket server listening on {ghost_server.config.listen_host}:{ghost_server.config.listen_port}")
     await ghost_server.shutdown_event.wait()
-    await runner.cleanup()
+    try:
+        await asyncio.wait_for(runner.cleanup(),timeout=5)
+    except (asyncio.TimeoutError,Exception):
+        pass

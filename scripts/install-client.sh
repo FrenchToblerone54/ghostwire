@@ -39,11 +39,16 @@ fi
 p_ok "Root access: OK"
 
 ARCH=$(uname -m)
-if [ "$ARCH" != "x86_64" ]; then
-    p_err "Only x86_64 (amd64) architecture is supported"
+if [ "$ARCH" = "x86_64" ]; then
+    BINARY_SUFFIX=""
+    p_ok "CPU: x86_64 — OK"
+elif [ "$ARCH" = "aarch64" ] || [ "$ARCH" = "arm64" ]; then
+    BINARY_SUFFIX="-arm64"
+    p_ok "CPU: arm64 — OK"
+else
+    p_err "Unsupported architecture: $ARCH (supported: x86_64, arm64)"
     exit 1
 fi
-p_ok "CPU: x86_64 — OK"
 
 OS=$(uname -s)
 if [ "$OS" != "Linux" ]; then
@@ -52,17 +57,18 @@ if [ "$OS" != "Linux" ]; then
 fi
 p_ok "OS: Linux — OK"
 
+GW_BASE_URL="${GW_MIRROR_BASE_URL:-https://github.com/${GITHUB_REPO}/releases/${VERSION}/download}"
 p_step "Downloading GhostWire client..."
-wget -q --show-progress "https://github.com/${GITHUB_REPO}/releases/${VERSION}/download/ghostwire-client" -O /tmp/ghostwire-client
-wget -q "https://github.com/${GITHUB_REPO}/releases/${VERSION}/download/ghostwire-client.sha256" -O /tmp/ghostwire-client.sha256
+wget -q --show-progress "${GW_BASE_URL}/ghostwire-client${BINARY_SUFFIX}" -O /tmp/ghostwire-client${BINARY_SUFFIX}
+wget -q "${GW_BASE_URL}/ghostwire-client${BINARY_SUFFIX}.sha256" -O /tmp/ghostwire-client${BINARY_SUFFIX}.sha256
 
 p_step "Verifying checksum..."
 cd /tmp
-sha256sum -c ghostwire-client.sha256
+sha256sum -c "ghostwire-client${BINARY_SUFFIX}.sha256"
 p_ok "Checksum verified"
 
 p_step "Installing binary..."
-install -m 755 /tmp/ghostwire-client /usr/local/bin/ghostwire-client
+install -m 755 /tmp/ghostwire-client${BINARY_SUFFIX} /usr/local/bin/ghostwire-client
 p_ok "Binary installed to /usr/local/bin/ghostwire-client"
 
 p_step "Creating configuration directory..."
@@ -155,6 +161,7 @@ Type=simple
 ExecStart=/usr/local/bin/ghostwire-client -c /etc/ghostwire/client.toml
 Restart=always
 RestartSec=5
+TimeoutStopSec=10
 
 [Install]
 WantedBy=multi-user.target

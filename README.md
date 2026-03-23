@@ -17,7 +17,7 @@ GhostWire is a WebSocket-based reverse tunnel system designed to help users in c
 - **CloudFlare compatible** - Works behind TLS-terminating proxies (with WebSocket/HTTP/2)
 - **Web management panel** - Real-time system monitoring, tunnel config, logs, service control
 - **nginx reverse proxy** - Production-ready setup with Let's Encrypt
-- **Compiled binaries** - Linux amd64 (Ubuntu 22.04+ compatible)
+- **Compiled binaries** - Linux amd64 and arm64 (Ubuntu 22.04+ compatible)
 - **systemd services** - Automated start, restart, logging
 - **Auto-update** - Configurable automatic binary updates via GitHub releases
 - **Easy installation** - One-command setup scripts with interactive configuration
@@ -151,8 +151,8 @@ listen_backlog=4096        # TCP listen queue depth
 websocket_path="/ws"       # Only used for websocket protocol
 ping_interval=30           # Application-level ping interval (seconds)
 ping_timeout=60            # Connection timeout (seconds)
-direct_http_proxy=""       # optional: proxy for direct-mode outbound CONNECT
-direct_https_proxy=""      # optional: proxy for direct-mode outbound CONNECT
+http_proxy=""              # optional: proxy for outbound CONNECT tunnel traffic
+https_proxy=""             # optional: proxy for outbound CONNECT tunnel traffic
 ws_pool_enabled=true       # Enable child channel pooling (default: true)
 ws_pool_children=8         # Max child channels (default: 8)
 ws_pool_min=2              # Min always-connected channels (default: 2)
@@ -162,6 +162,7 @@ ws_send_batch_bytes=65536  # Max bytes per WebSocket frame (default: 65536)
 auto_update=true
 update_check_interval=300
 update_check_on_startup=true
+service_name="ghostwire-server"  # systemd service name for auto-restart after update
 
 [auth]
 token="V1StGXR8_Z5jdHi6B-my"
@@ -227,8 +228,11 @@ token="V1StGXR8_Z5jdHi6B-my"
 mode="reverse"             # must match server mode
 ping_interval=30           # Application-level ping interval (seconds)
 ping_timeout=60            # Connection timeout (seconds)
-direct_http_proxy=""       # optional
-direct_https_proxy=""      # optional
+http_proxy=""              # optional: proxy for WebSocket tunnel connection
+https_proxy=""             # optional: proxy for WebSocket tunnel connection (preferred for wss://)
+allow_insecure=false       # allow expired/self-signed certificates (less secure)
+resolve_ip=""              # pre-resolve domain to IP; domain still sent as Host header
+service_name="ghostwire-client"  # systemd service name for auto-restart after update
 ws_send_batch_bytes=65536  # Max bytes per WebSocket frame (default: 65536)
 auto_update=true
 update_check_interval=300
@@ -246,8 +250,8 @@ host=""
 check_interval=300
 max_connection_time=1740
 
-[tunnels]
-ports=[]                   # set on listener side for chosen mode
+# [tunnels] section is only needed in direct mode (mode="direct")
+# ports=[]
 
 [logging]
 level="info"
@@ -273,17 +277,17 @@ update_https_proxy="http://127.0.0.1:8080"
 
 These proxy settings **only affect auto-update downloads** from GitHub. They do not affect tunnel traffic. Leave empty (or omit) if no proxy is needed.
 
-### HTTP/HTTPS Proxy for Direct Mode Tunnel Traffic
+### HTTP/HTTPS Proxy for Tunnel Traffic
 
-For `mode="direct"`, outbound target connections can be routed through an HTTP proxy using CONNECT:
+For tunnel outbound target connections (`reverse` and `direct`), GhostWire can route via an HTTP proxy using CONNECT:
 
 ```toml
-direct_http_proxy="http://127.0.0.1:8080"
-direct_https_proxy="http://127.0.0.1:8080"
+http_proxy="http://127.0.0.1:8080"
+https_proxy="http://127.0.0.1:8080"
 ```
 
-- `direct_https_proxy` is preferred for destination port `443`
-- `direct_http_proxy` is used for other ports (or as fallback)
+- `https_proxy` is preferred for destination port `443`
+- `http_proxy` is used for other ports (or as fallback)
 - Supports proxy auth in URL form: `http://user:pass@proxy:8080`
 
 ## Protocol Options

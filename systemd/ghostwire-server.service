@@ -7,6 +7,7 @@ Type=simple
 ExecStart=/usr/local/bin/ghostwire-server -c /etc/ghostwire/server.toml
 Restart=always
 RestartSec=5
+TimeoutStopSec=10
 
 [Install]
 WantedBy=multi-user.target

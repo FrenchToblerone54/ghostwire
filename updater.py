@@ -5,6 +5,7 @@ import os
 import sys
 import hashlib
 import json
+import platform
 import aiohttp
 from pathlib import Path
 
@@ -13,20 +14,23 @@ logger=logging.getLogger(__name__)
 GITHUB_REPO="frenchtoblerone54/ghostwire"
 
 class Updater:
-    def __init__(self,component_name,check_interval=300,check_on_startup=True,http_proxy="",https_proxy=""):
+    def __init__(self,component_name,check_interval=300,check_on_startup=True,http_proxy="",https_proxy="",service_name=""):
         self.component_name=component_name
         self.check_interval=check_interval
         self.check_on_startup=check_on_startup
         self.http_proxy=http_proxy
         self.https_proxy=https_proxy
+        self.service_name=service_name or f"ghostwire-{component_name}"
         self.current_version=self.get_current_version()
-        self.update_url=f"https://github.com/{GITHUB_REPO}/releases/latest/download/ghostwire-{component_name}"
+        arch=platform.machine()
+        arch_suffix="-arm64" if arch in ("aarch64","arm64") else ""
+        self.update_url=f"https://github.com/{GITHUB_REPO}/releases/latest/download/ghostwire-{component_name}{arch_suffix}"
         self.check_url=f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
 
     def get_current_version(self):
         script_path=Path(sys.argv[0])
         if script_path.name.startswith(f"ghostwire-{self.component_name}"):
-            return "v0.15.0"
+            return "v0.16.0"
         return "dev"
 
     async def http_get(self,url,timeout):
@@ -149,11 +153,11 @@ class Updater:
         shutil.move(binary_path,executable_path)
         os.chmod(executable_path,0o755)
         print(f"Updated to {new_version}!")
-        ret=subprocess.run(["systemctl","restart",f"ghostwire-{self.component_name}"],capture_output=True)
+        ret=subprocess.run(["systemctl","restart",self.service_name],capture_output=True)
         if ret.returncode==0:
-            print(f"Service ghostwire-{self.component_name} restarted.")
+            print(f"Service {self.service_name} restarted.")
         else:
-            print(f"Update installed. Restart manually: systemctl restart ghostwire-{self.component_name}")
+            print(f"Update installed. Restart manually: systemctl restart {self.service_name}")
 
     async def update_loop(self,shutdown_event):
         logger.info(f"Auto-update checker started (interval: {self.check_interval}s, current version: {self.current_version})")

@@ -9,7 +9,7 @@ on:
 permissions:
   contents: write
 jobs:
-  release:
+  build-amd64:
     runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
@@ -21,24 +21,66 @@ jobs:
           if ! command -v python3.13 >/dev/null 2>&1; then
             sudo ln -sf "$(which python)" /usr/local/bin/python3.13
           fi
+      - name: Install deps
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt
+      - name: Build
+        run: bash build/build.sh
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist-amd64
+          path: dist/
+  build-arm64:
+    runs-on: ubuntu-22.04-arm
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Ensure python3.13 alias
+        run: |
+          if ! command -v python3.13 >/dev/null 2>&1; then
+            sudo ln -sf "$(which python)" /usr/local/bin/python3.13
+          fi
+      - name: Install deps
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt
+      - name: Build
+        run: bash build/build.sh
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist-arm64
+          path: dist/
+  release:
+    needs: [build-amd64, build-arm64]
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
       - name: Normalize version input
         id: ver
         run: |
           ver="${{ inputs.version }}"
           ver="${ver#v}"
           echo "version=$ver" >> "$GITHUB_OUTPUT"
-      - name: Install deps
-        run: |
-          python -m pip install --upgrade pip
-          python -m pip install -r requirements.txt
-      - name: Build
-        run: |
-          bash build/build.sh
+      - name: Download amd64 artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: dist-amd64
+          path: dist-amd64/
+      - name: Download arm64 artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: dist-arm64
+          path: dist-arm64/
       - name: Create release
         uses: ncipollo/release-action@v1
         with:
           tag: v${{ steps.ver.outputs.version }}
           name: v${{ steps.ver.outputs.version }}
-          artifacts: dist/ghostwire-server,dist/ghostwire-server.sha256,dist/ghostwire-client,dist/ghostwire-client.sha256
+          artifacts: dist-amd64/ghostwire-server,dist-amd64/ghostwire-server.sha256,dist-amd64/ghostwire-client,dist-amd64/ghostwire-client.sha256,dist-arm64/ghostwire-server-arm64,dist-arm64/ghostwire-server-arm64.sha256,dist-arm64/ghostwire-client-arm64,dist-arm64/ghostwire-client-arm64.sha256
           allowUpdates: true
           generateReleaseNotes: true

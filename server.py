@@ -71,7 +71,7 @@ class GhostWireServer:
         self.ws_max_queue=2048
         logger.info("Generating RSA key pair for secure authentication...")
         self.private_key,self.public_key=generate_rsa_keypair()
-        self.updater=Updater("server",check_interval=config.update_check_interval,check_on_startup=config.update_check_on_startup,http_proxy=config.update_http_proxy,https_proxy=config.update_https_proxy)
+        self.updater=Updater("server",check_interval=config.update_check_interval,check_on_startup=config.update_check_on_startup,http_proxy=config.update_http_proxy,https_proxy=config.update_https_proxy,service_name=config.service_name)
 
     def mode_is_server_listen(self):
         return self.config.mode=="reverse"
@@ -80,11 +80,11 @@ class GhostWireServer:
         return self.config.mode=="direct"
 
     def pick_direct_proxy(self,remote_port):
-        if remote_port==443 and self.config.direct_https_proxy:
-            return self.config.direct_https_proxy
-        if self.config.direct_http_proxy:
-            return self.config.direct_http_proxy
-        return self.config.direct_https_proxy
+        if remote_port==443 and self.config.https_proxy:
+            return self.config.https_proxy
+        if self.config.http_proxy:
+            return self.config.http_proxy
+        return self.config.https_proxy
 
     async def connect_via_http_proxy(self,target_host,target_port,proxy_url,timeout=10):
         parsed=urlparse(proxy_url)
@@ -115,7 +115,7 @@ class GhostWireServer:
                 await writer.wait_closed()
             except:
                 pass
-            raise ConnectionError(f"Direct proxy CONNECT failed: {status_line}")
+            raise ConnectionError(f"Proxy CONNECT failed: {status_line}")
         return reader,writer
 
     def clear_conn_writers(self):
@@ -369,7 +369,7 @@ class GhostWireServer:
                     self.conn_data_rx_wait_start.pop(conn_id,None)
 
     async def close_child_channels(self):
-        for child_id,channel in list(self.child_channels.items()):
+        async def _close_one(child_id,channel):
             stop_event=channel.get("stop_event")
             sender=channel.get("sender")
             ws=channel.get("ws")
@@ -386,6 +386,7 @@ class GhostWireServer:
                 except:
                     pass
             self.child_channels.pop(child_id,None)
+        await asyncio.gather(*[_close_one(cid,ch) for cid,ch in list(self.child_channels.items())],return_exceptions=True)
         self.conn_channel_map.clear()
 
     async def close_connections_for_child(self,child_id):

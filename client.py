@@ -79,19 +79,33 @@ class GhostWireClient:
         self.ws_send_batch_bytes=config.ws_send_batch_bytes
         self.ws_write_limit=4194304
         self.ws_max_queue=2048
-        self.updater=Updater("client",check_interval=config.update_check_interval,check_on_startup=config.update_check_on_startup,http_proxy=config.update_http_proxy,https_proxy=config.update_https_proxy)
+        self.updater=Updater("client",check_interval=config.update_check_interval,check_on_startup=config.update_check_on_startup,http_proxy=config.update_http_proxy,https_proxy=config.update_https_proxy,service_name=config.service_name)
 
+    def pick_ws_proxy(self,url):
+        if url.startswith("wss://") or url.startswith("https://"):
+            return self.config.https_proxy or self.config.http_proxy or None
+        return self.config.http_proxy or self.config.https_proxy or None
+    def make_ssl_context(self,url):
+        if self.config.allow_insecure:
+            return False
+        return url.startswith("wss://") or url.startswith("https://")
+    def apply_resolve_ip(self,url):
+        if not self.config.resolve_ip:
+            return url,{}
+        parsed=urlparse(url)
+        host_header=parsed.hostname
+        port=f":{parsed.port}" if parsed.port else ""
+        modified=url.replace(f"{parsed.scheme}://{parsed.hostname}{port}",f"{parsed.scheme}://{self.config.resolve_ip}{port}",1)
+        return modified,{"Host":host_header}
     def mode_accept_remote_connect(self):
         return self.config.mode=="reverse"
 
     def pick_direct_proxy(self,remote_port):
-        if self.config.mode!="direct":
-            return ""
-        if remote_port==443 and self.config.direct_https_proxy:
-            return self.config.direct_https_proxy
-        if self.config.direct_http_proxy:
-            return self.config.direct_http_proxy
-        return self.config.direct_https_proxy
+        if remote_port==443 and self.config.https_proxy:
+            return self.config.https_proxy
+        if self.config.http_proxy:
+            return self.config.http_proxy
+        return self.config.https_proxy
 
     async def connect_via_http_proxy(self,target_host,target_port,proxy_url,timeout=10):
         parsed=urlparse(proxy_url)
@@ -122,7 +136,7 @@ class GhostWireClient:
                 await writer.wait_closed()
             except:
                 pass
-            raise ConnectionError(f"Direct proxy CONNECT failed: {status_line}")
+            raise ConnectionError(f"Proxy CONNECT failed: {status_line}")
         return reader,writer
 
     def clear_conn_writers(self):
@@ -644,8 +658,7 @@ class GhostWireClient:
             self.child_channels.pop(channel_id,None)
 
     async def close_all_child_channels(self):
-        for child_id in list(self.child_channels.keys()):
-            await self.close_channel(child_id)
+        await asyncio.gather(*[self.close_channel(child_id) for child_id in list(self.child_channels.keys())],return_exceptions=True)
 
     async def child_worker(self,slot_id):
         delay=self.config.initial_delay
@@ -703,6 +716,7 @@ class GhostWireClient:
                     server_url=self.config.server_url.replace(self.config.cloudflare_host,best_ip)
                     logger.info(f"Using CloudFlare IP: {best_ip}")
             self.connected_server_url=server_url
+            server_url,extra_headers=self.apply_resolve_ip(server_url)
             if self.config.protocol=="http2":
                 from http2_transport import HTTP2ClientTransport
                 self.http2_transport=HTTP2ClientTransport(server_url,self.config.token)
@@ -748,7 +762,11 @@ class GhostWireClient:
                 return True
             elif self.config.protocol=="aiohttp-ws":
                 session=aiohttp.ClientSession()
-                ws=await session.ws_connect(server_url,max_msg_size=0,compress=False,heartbeat=None)
+                try:
+                    ws=await session.ws_connect(server_url,max_msg_size=0,compress=False,heartbeat=None,proxy=self.pick_ws_proxy(server_url),ssl=self.make_ssl_context(server_url),headers=extra_headers)
+                except Exception:
+                    await session.close()
+                    raise
                 self.main_websocket=AiohttpClientWebSocket(ws,session)
                 self.websocket=self.main_websocket
                 pubkey_msg=await asyncio.wait_for(self.main_websocket.recv(),timeout=10)
@@ -777,7 +795,11 @@ class GhostWireClient:
                 return True
             else:
                 session=aiohttp.ClientSession()
-                ws=await session.ws_connect(server_url,max_msg_size=0,compress=False,heartbeat=None)
+                try:
+                    ws=await session.ws_connect(server_url,max_msg_size=0,compress=False,heartbeat=None,proxy=self.pick_ws_proxy(server_url),ssl=self.make_ssl_context(server_url),headers=extra_headers)
+                except Exception:
+                    await session.close()
+                    raise
                 self.main_websocket=AiohttpClientWebSocket(ws,session)
                 self.websocket=self.main_websocket
                 pubkey_msg=await asyncio.wait_for(self.main_websocket.recv(),timeout=10)
@@ -819,7 +841,11 @@ class GhostWireClient:
                 test_url=self.config.server_url.replace(self.config.cloudflare_host,ip)
                 start=time.time()
                 session=aiohttp.ClientSession()
-                ws_raw=await asyncio.wait_for(session.ws_connect(test_url,max_msg_size=0,compress=False,heartbeat=None),timeout=5)
+                try:
+                    ws_raw=await asyncio.wait_for(session.ws_connect(test_url,max_msg_size=0,compress=False,heartbeat=None,proxy=self.pick_ws_proxy(test_url),ssl=self.make_ssl_context(test_url)),timeout=5)
+                except Exception:
+                    await session.close()
+                    raise
                 latency=time.time()-start
                 ws=AiohttpClientWebSocket(ws_raw,session)
                 await ws.close()
@@ -833,8 +859,13 @@ class GhostWireClient:
     async def connect_child_channel(self,server_url,slot_id):
         child_id=generate(size=20)
         try:
+            server_url,extra_headers=self.apply_resolve_ip(server_url)
             session=aiohttp.ClientSession()
-            ws_raw=await session.ws_connect(server_url,max_msg_size=0,compress=False,heartbeat=None)
+            try:
+                ws_raw=await session.ws_connect(server_url,max_msg_size=0,compress=False,heartbeat=None,proxy=self.pick_ws_proxy(server_url),ssl=self.make_ssl_context(server_url),headers=extra_headers)
+            except Exception:
+                await session.close()
+                raise
             ws=AiohttpClientWebSocket(ws_raw,session)
             pubkey_msg=await asyncio.wait_for(ws.recv(),timeout=10)
             if len(pubkey_msg)<9:
