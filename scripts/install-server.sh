@@ -3,6 +3,7 @@ set -e
 
 GITHUB_REPO="frenchtoblerone54/ghostwire"
 VERSION="latest"
+GW_SERVICE_NAME="ghostwire-server"
 RED="\033[0;31m"
 GREEN="\033[0;32m"
 YELLOW="\033[1;33m"
@@ -112,24 +113,44 @@ if [ ! -f /etc/ghostwire/server.toml ]; then
     WS_HOST=${WS_HOST:-127.0.0.1}
     p_ask "WebSocket listen port [8443]: "; read -r WS_PORT
     WS_PORT=${WS_PORT:-8443}
+    p_ok "WebSocket: ${WS_HOST}:${WS_PORT}"
     p_sep
-    p_info "Port Mapping Configuration (users connect to this):"
-    p_info "Enter comma-separated port mappings:"
-    p_info "  8080=80,8443=443              — Simple port forwarding"
-    p_info "  8000-8010=3000                — Port range to single destination"
-    p_info "  9000=1.1.1.1:443              — Forward to remote IP"
-    p_info "  127.0.0.1:8080=80             — Bind to specific local IP"
+    p_info "Tunnel Mode:"
+    p_info "  reverse — server listens on configured ports, client forwards to internet (default)"
+    p_info "  direct  — client listens on configured ports, server forwards to targets"
+    GW_MODE=""
     while true; do
-        p_ask "Port mappings [8080=80,8443=443]: "; read -r TUNNEL_INPUT
-        TUNNEL_INPUT=${TUNNEL_INPUT:-"8080=80,8443=443"}
-        if [ -z "$TUNNEL_INPUT" ]; then
-            p_err "This field is required"
-            continue
-        fi
-        break
+        p_ask "Mode [1=reverse, 2=direct] (default: 1): "; read -r GW_MODE
+        GW_MODE=${GW_MODE:-1}
+        case "$GW_MODE" in
+            "1") GW_MODE="reverse"; break ;;
+            "2") GW_MODE="direct"; break ;;
+            *) p_err "Please enter 1 or 2" ;;
+        esac
     done
-    IFS="," read -ra TUNNELS <<< "$TUNNEL_INPUT"
-    TUNNELS=("${TUNNELS[@]// /}")
+    p_ok "Mode: ${GW_MODE}"
+    p_sep
+    TUNNELS=()
+    TUNNEL_ARRAY="[]"
+    if [ "$GW_MODE" = "reverse" ]; then
+        p_info "Port Mapping Configuration (users connect to these ports):"
+        p_info "  8080=80,8443=443              — Simple port forwarding"
+        p_info "  8000-8010=3000                — Port range to single destination"
+        p_info "  9000=1.1.1.1:443              — Forward to remote IP"
+        p_info "  127.0.0.1:8080=80             — Bind to specific local IP"
+        while true; do
+            p_ask "Port mappings [8080=80,8443=443]: "; read -r TUNNEL_INPUT
+            TUNNEL_INPUT=${TUNNEL_INPUT:-"8080=80,8443=443"}
+            [ -n "$TUNNEL_INPUT" ] && break
+            p_err "This field is required"
+        done
+        IFS="," read -ra TUNNELS <<< "$TUNNEL_INPUT"
+        TUNNELS=("${TUNNELS[@]// /}")
+        TUNNEL_ARRAY=$(printf ",\"%s\"" "${TUNNELS[@]}")
+        TUNNEL_ARRAY="[${TUNNEL_ARRAY:1}]"
+    else
+        p_info "Direct mode: port mappings are defined on the client side."
+    fi
     p_sep
     p_ask "Enable auto-update? [Y/n]: "; read -r AUTO_UPDATE
     AUTO_UPDATE=${AUTO_UPDATE:-y}
@@ -158,16 +179,28 @@ port=${PANEL_PORT}
 path=\"${PANEL_PATH}\"
 threads=4"
     fi
-    TUNNEL_ARRAY=$(printf ",\"%s\"" "${TUNNELS[@]}")
-    TUNNEL_ARRAY="[${TUNNEL_ARRAY:1}]"
+    p_sep
+    p_info "WebSocket Pool — controls max parallel WebSocket connections:"
+    p_info "  2-4:   Light usage (< 50 concurrent connections)"
+    p_info "  8:     Default, good for most deployments"
+    p_info "  16-32: Heavy usage (multiple simultaneous users)"
+    p_ask "WebSocket pool size (ws_pool_children) [8]: "; read -r WS_POOL_CHILDREN
+    WS_POOL_CHILDREN=${WS_POOL_CHILDREN:-8}
+    p_ok "ws_pool_children: ${WS_POOL_CHILDREN}"
+    p_sep
+    p_info "Service Name — the systemd service name used for auto-restart after updates."
+    p_ask "Service name [ghostwire-server]: "; read -r GW_SERVICE_NAME
+    GW_SERVICE_NAME=${GW_SERVICE_NAME:-ghostwire-server}
+    p_ok "Service name: ${GW_SERVICE_NAME}"
     p_sep
     p_step "Configuration Summary:"
     p_info "WebSocket: ${WS_HOST}:${WS_PORT}/ws"
-    p_info "Tunnels: ${TUNNEL_ARRAY}"
+    p_info "Mode: ${GW_MODE}"
+    [ "$GW_MODE" = "reverse" ] && p_info "Tunnels: ${TUNNEL_ARRAY}"
+    p_info "ws_pool_children: ${WS_POOL_CHILDREN}"
     p_info "Auto-update: ${AUTO_UPDATE}"
-    if [[ $PANEL_ENABLED == "true" ]]; then
-        p_info "Web panel: http://${PANEL_HOST}:${PANEL_PORT}/${PANEL_PATH}/"
-    fi
+    p_info "Service name: ${GW_SERVICE_NAME}"
+    [[ $PANEL_ENABLED == "true" ]] && p_info "Web panel: http://${PANEL_HOST}:${PANEL_PORT}/${PANEL_PATH}/"
     echo ""
     p_ask "Confirm and save configuration? [Y/n]: "; read -r CONFIRM
     CONFIRM=${CONFIRM:-y}
@@ -181,12 +214,13 @@ threads=4"
 protocol="websocket"
 listen_host="${WS_HOST}"
 listen_port=${WS_PORT}
+mode="${GW_MODE}"
 listen_backlog=4096
 websocket_path="/ws"
 ping_interval=30
 ping_timeout=60
 ws_pool_enabled=true
-ws_pool_children=8
+ws_pool_children=${WS_POOL_CHILDREN}
 ws_pool_min=2
 ws_pool_stripe=false
 udp_enabled=true
@@ -194,12 +228,19 @@ ws_send_batch_bytes=65536
 auto_update=${AUTO_UPDATE}
 update_check_interval=300
 update_check_on_startup=true
+service_name="${GW_SERVICE_NAME}"
 
 [auth]
 token="${TOKEN}"
+EOF
+    if [ "$GW_MODE" = "reverse" ]; then
+        cat >> /etc/ghostwire/server.toml <<EOF
 
 [tunnels]
 ports=${TUNNEL_ARRAY}
+EOF
+    fi
+    cat >> /etc/ghostwire/server.toml <<EOF
 
 [logging]
 level="info"
@@ -208,9 +249,7 @@ EOF
 
     p_ok "Configuration created at /etc/ghostwire/server.toml"
     p_token_box "$TOKEN"
-    if [[ $PANEL_ENABLED == "true" ]]; then
-        p_panel_box "http://${PANEL_HOST}:${PANEL_PORT}/${PANEL_PATH}/"
-    fi
+    [[ $PANEL_ENABLED == "true" ]] && p_panel_box "http://${PANEL_HOST}:${PANEL_PORT}/${PANEL_PATH}/"
     p_info "Tip: If using a domain, enable Cloudflare proxy for better reliability and DDoS protection."
     echo ""
 else
@@ -220,7 +259,7 @@ else
 fi
 
 p_step "Installing systemd service..."
-cat > /etc/systemd/system/ghostwire-server.service <<EOF
+cat > /etc/systemd/system/${GW_SERVICE_NAME}.service <<EOF
 [Unit]
 Description=GhostWire Server
 After=network.target
@@ -237,7 +276,7 @@ WantedBy=multi-user.target
 EOF
 
 systemctl daemon-reload
-p_ok "Systemd service installed"
+p_ok "Systemd service installed: ${GW_SERVICE_NAME}"
 
 p_sep
 p_ask "Setup nginx now? [y/N] "; read -r -n 1 REPLY; echo
@@ -386,12 +425,12 @@ else
 fi
 
 p_step "Enabling and starting GhostWire server..."
-systemctl enable ghostwire-server
-if systemctl is-active --quiet ghostwire-server; then
+systemctl enable ${GW_SERVICE_NAME}
+if systemctl is-active --quiet ${GW_SERVICE_NAME}; then
     p_warn "Restarting existing service..."
-    systemctl restart ghostwire-server
+    systemctl restart ${GW_SERVICE_NAME}
 else
-    systemctl start ghostwire-server
+    systemctl start ${GW_SERVICE_NAME}
 fi
 p_ok "GhostWire server is running"
 
@@ -401,8 +440,8 @@ p_sep
 p_info "Configuration: /etc/ghostwire/server.toml"
 echo ""
 p_info "Useful commands:"
-echo -e "  ${DIM}sudo systemctl status ghostwire-server${NC}"
-echo -e "  ${DIM}sudo systemctl stop ghostwire-server${NC}"
-echo -e "  ${DIM}sudo systemctl restart ghostwire-server${NC}"
-echo -e "  ${DIM}sudo journalctl -u ghostwire-server -f${NC}"
+echo -e "  ${DIM}sudo systemctl status ${GW_SERVICE_NAME}${NC}"
+echo -e "  ${DIM}sudo systemctl stop ${GW_SERVICE_NAME}${NC}"
+echo -e "  ${DIM}sudo systemctl restart ${GW_SERVICE_NAME}${NC}"
+echo -e "  ${DIM}sudo journalctl -u ${GW_SERVICE_NAME} -f${NC}"
 echo ""

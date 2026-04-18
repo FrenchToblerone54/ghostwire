@@ -3,6 +3,7 @@ set -e
 
 GITHUB_REPO="frenchtoblerone54/ghostwire"
 VERSION="latest"
+GW_SERVICE_NAME="ghostwire-client"
 RED="\033[0;31m"
 GREEN="\033[0;32m"
 YELLOW="\033[1;33m"
@@ -90,14 +91,50 @@ if [ ! -f /etc/ghostwire/client.toml ]; then
         fi
         break
     done
+    p_ok "Server URL: ${SERVER_URL}"
     while true; do
         p_ask "Authentication token: "; read -r TOKEN
-        if [ -z "$TOKEN" ]; then
-            p_err "This field is required"
-            continue
-        fi
+        [ -z "$TOKEN" ] && { p_err "This field is required"; continue; }
         break
     done
+    p_ok "Token: ${TOKEN:0:8}... (accepted)"
+    p_sep
+    p_info "Tunnel Mode — must match the server's mode:"
+    p_info "  reverse — server listens, client connects out (default)"
+    p_info "  direct  — client listens on configured ports, server forwards to targets"
+    GW_MODE=""
+    while true; do
+        p_ask "Mode [1=reverse, 2=direct] (default: 1): "; read -r GW_MODE
+        GW_MODE=${GW_MODE:-1}
+        case "$GW_MODE" in
+            "1") GW_MODE="reverse"; break ;;
+            "2") GW_MODE="direct"; break ;;
+            *) p_err "Please enter 1 or 2" ;;
+        esac
+    done
+    p_ok "Mode: ${GW_MODE}"
+    p_sep
+    TUNNELS=()
+    TUNNEL_ARRAY="[]"
+    if [ "$GW_MODE" = "direct" ]; then
+        p_info "Port Mapping Configuration (client listens on these ports in direct mode):"
+        p_info "  8080=80,8443=443              — Simple port forwarding"
+        p_info "  8000-8010=3000                — Port range to single destination"
+        p_info "  9000=1.1.1.1:443              — Forward to remote IP"
+        while true; do
+            p_ask "Port mappings [8080=80,8443=443]: "; read -r TUNNEL_INPUT
+            TUNNEL_INPUT=${TUNNEL_INPUT:-"8080=80,8443=443"}
+            [ -n "$TUNNEL_INPUT" ] && break
+            p_err "This field is required"
+        done
+        IFS="," read -ra TUNNELS <<< "$TUNNEL_INPUT"
+        TUNNELS=("${TUNNELS[@]// /}")
+        TUNNEL_ARRAY=$(printf ",\"%s\"" "${TUNNELS[@]}")
+        TUNNEL_ARRAY="[${TUNNEL_ARRAY:1}]"
+    else
+        p_info "Reverse mode: port mappings are defined on the server side."
+    fi
+    p_sep
     p_ask "Enable auto-update? [Y/n]: "; read -r AUTO_UPDATE
     AUTO_UPDATE=${AUTO_UPDATE:-y}
     if [[ $AUTO_UPDATE =~ ^[Yy]$ ]]; then
@@ -106,10 +143,18 @@ if [ ! -f /etc/ghostwire/client.toml ]; then
         AUTO_UPDATE="false"
     fi
     p_sep
+    p_info "Service Name — the systemd service name used for auto-restart after updates."
+    p_ask "Service name [ghostwire-client]: "; read -r GW_SERVICE_NAME
+    GW_SERVICE_NAME=${GW_SERVICE_NAME:-ghostwire-client}
+    p_ok "Service name: ${GW_SERVICE_NAME}"
+    p_sep
     p_step "Configuration Summary:"
     p_info "Server URL: ${SERVER_URL}"
-    p_info "Token: ${TOKEN:0:10}..."
+    p_info "Mode: ${GW_MODE}"
+    [ "$GW_MODE" = "direct" ] && p_info "Tunnels: ${TUNNEL_ARRAY}"
+    p_info "Token: ${TOKEN:0:8}..."
     p_info "Auto-update: ${AUTO_UPDATE}"
+    p_info "Service name: ${GW_SERVICE_NAME}"
     echo ""
     p_ask "Confirm and save configuration? [Y/n]: "; read -r CONFIRM
     CONFIRM=${CONFIRM:-y}
@@ -123,12 +168,14 @@ if [ ! -f /etc/ghostwire/client.toml ]; then
 protocol="websocket"
 url="${SERVER_URL}"
 token="${TOKEN}"
+mode="${GW_MODE}"
 ping_interval=30
 ping_timeout=60
 ws_send_batch_bytes=65536
 auto_update=${AUTO_UPDATE}
 update_check_interval=300
 update_check_on_startup=true
+service_name="${GW_SERVICE_NAME}"
 
 [reconnect]
 initial_delay=1
@@ -141,6 +188,15 @@ ips=[]
 host=""
 check_interval=300
 max_connection_time=1740
+EOF
+    if [ "$GW_MODE" = "direct" ]; then
+        cat >> /etc/ghostwire/client.toml <<EOF
+
+[tunnels]
+ports=${TUNNEL_ARRAY}
+EOF
+    fi
+    cat >> /etc/ghostwire/client.toml <<EOF
 
 [logging]
 level="info"
@@ -151,7 +207,7 @@ EOF
 fi
 
 p_step "Installing systemd service..."
-cat > /etc/systemd/system/ghostwire-client.service <<EOF
+cat > /etc/systemd/system/${GW_SERVICE_NAME}.service <<EOF
 [Unit]
 Description=GhostWire Client
 After=network.target
@@ -168,28 +224,28 @@ WantedBy=multi-user.target
 EOF
 
 systemctl daemon-reload
-p_ok "Systemd service installed"
+p_ok "Systemd service installed: ${GW_SERVICE_NAME}"
 
 p_step "Enabling and starting GhostWire client..."
-systemctl enable ghostwire-client
-if systemctl is-active --quiet ghostwire-client; then
+systemctl enable ${GW_SERVICE_NAME}
+if systemctl is-active --quiet ${GW_SERVICE_NAME}; then
     p_warn "Restarting existing service..."
-    systemctl restart ghostwire-client
+    systemctl restart ${GW_SERVICE_NAME}
 else
-    systemctl start ghostwire-client
+    systemctl start ${GW_SERVICE_NAME}
 fi
 p_ok "GhostWire client is running"
 
 p_sep
 p_ok "Installation complete!"
 p_sep
-p_info "Client is running and listening on configured ports"
+p_info "Client is running and connecting to the server"
 p_info "Configuration: /etc/ghostwire/client.toml"
 p_info "Tip: If connection is unreliable, enable Cloudflare proxy for your domain to improve stability."
 echo ""
 p_info "Useful commands:"
-echo -e "  ${DIM}sudo systemctl status ghostwire-client${NC}"
-echo -e "  ${DIM}sudo systemctl stop ghostwire-client${NC}"
-echo -e "  ${DIM}sudo systemctl restart ghostwire-client${NC}"
-echo -e "  ${DIM}sudo journalctl -u ghostwire-client -f${NC}"
+echo -e "  ${DIM}sudo systemctl status ${GW_SERVICE_NAME}${NC}"
+echo -e "  ${DIM}sudo systemctl stop ${GW_SERVICE_NAME}${NC}"
+echo -e "  ${DIM}sudo systemctl restart ${GW_SERVICE_NAME}${NC}"
+echo -e "  ${DIM}sudo journalctl -u ${GW_SERVICE_NAME} -f${NC}"
 echo ""
