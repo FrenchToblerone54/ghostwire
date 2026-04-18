@@ -779,7 +779,7 @@ class GhostWireClient:
                 client_private_key,client_public_key=generate_rsa_keypair()
                 auth_msg=pack_auth_message(self.config.token,server_public_key,role="main",auth_salt=auth_salt)
                 await self.main_websocket.send(auth_msg)
-                await self.main_websocket.send(pack_pubkey(client_public_key,os.urandom(AUTH_SALT_SIZE)))
+                await self.main_websocket.send(pack_pubkey(client_public_key))
                 session_msg=await asyncio.wait_for(self.main_websocket.recv(),timeout=10)
                 session_type,_,session_payload,_=await unpack_message(session_msg,None)
                 if session_type!=MSG_SESSION_KEY:
@@ -812,7 +812,7 @@ class GhostWireClient:
                 client_private_key,client_public_key=generate_rsa_keypair()
                 auth_msg=pack_auth_message(self.config.token,server_public_key,role="main",auth_salt=auth_salt)
                 await self.main_websocket.send(auth_msg)
-                await self.main_websocket.send(pack_pubkey(client_public_key,os.urandom(AUTH_SALT_SIZE)))
+                await self.main_websocket.send(pack_pubkey(client_public_key))
                 session_msg=await asyncio.wait_for(self.main_websocket.recv(),timeout=10)
                 session_type,_,session_payload,_=await unpack_message(session_msg,None)
                 if session_type!=MSG_SESSION_KEY:

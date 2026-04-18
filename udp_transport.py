@@ -97,7 +97,7 @@ class UDPClientTransport:
                 server_public_key,auth_salt=unpack_pubkey_payload(pubkey_bytes)
                 client_private_key,client_public_key=generate_rsa_keypair()
                 self._transport.sendto(pack_auth_message(self.token,server_public_key,role="main",auth_salt=auth_salt))
-                self._transport.sendto(pack_pubkey(client_public_key,os.urandom(AUTH_SALT_SIZE)))
+                self._transport.sendto(pack_pubkey(client_public_key))
                 session_data=await asyncio.wait_for(self._recv_queue.get(),timeout=5)
                 if len(session_data)<9:
                     continue

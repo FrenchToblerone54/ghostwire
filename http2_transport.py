@@ -414,7 +414,7 @@ class HTTP2ClientTransport:
             auth_msg=pack_auth_message(self.token,server_public_key,role="main",auth_salt=auth_salt)
             frame_data=struct.pack("!I",len(auth_msg))+auth_msg
             await self._send_framed_bytes(frame_data)
-            pubkey_msg=pack_pubkey(client_public_key,os.urandom(AUTH_SALT_SIZE))
+            pubkey_msg=pack_pubkey(client_public_key)
             frame_data=struct.pack("!I",len(pubkey_msg))+pubkey_msg
             await self._send_framed_bytes(frame_data)
             logger.debug("Waiting for session key...")

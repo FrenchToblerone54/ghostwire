@@ -69,9 +69,9 @@ def unpack_header(header):
 def derive_auth_key(token,auth_salt):
     return hashlib.pbkdf2_hmac("sha256",token.encode(),auth_salt,100000,32)
 
-def pack_pubkey(public_key,auth_salt):
+def pack_pubkey(public_key,auth_salt=None):
     pubkey_bytes=serialize_public_key(public_key)
-    data=pubkey_bytes+auth_salt
+    data=pubkey_bytes+(auth_salt if auth_salt is not None else b"")
     header=pack_header(MSG_PUBKEY,0,len(data))
     return header+data
 

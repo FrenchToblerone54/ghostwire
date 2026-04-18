@@ -257,7 +257,7 @@ class GrpcClientTransport:
             client_private_key,client_public_key=generate_rsa_keypair()
             auth_msg=pack_auth_message(self.token,server_public_key,role="main",auth_salt=auth_salt)
             await self.stream.send_message(TunnelMessage(data=auth_msg))
-            pubkey_msg_data=pack_pubkey(client_public_key,os.urandom(AUTH_SALT_SIZE))
+            pubkey_msg_data=pack_pubkey(client_public_key)
             await self.stream.send_message(TunnelMessage(data=pubkey_msg_data))
             logger.debug("Waiting for session key...")
             session_msg=await asyncio.wait_for(self.stream.recv_message(),timeout=30)
