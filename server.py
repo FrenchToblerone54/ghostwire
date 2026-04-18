@@ -452,7 +452,8 @@ class GhostWireServer:
         stop_event=asyncio.Event()
         self.last_ping_time=time.time()
         try:
-            pubkey_msg=pack_pubkey(self.public_key)
+            auth_salt=os.urandom(AUTH_SALT_SIZE)
+            pubkey_msg=pack_pubkey(self.public_key,auth_salt)
             await websocket.send(pubkey_msg)
             buffer=bytearray()
             auth_msg=await asyncio.wait_for(websocket.recv(),timeout=30)
@@ -471,7 +472,7 @@ class GhostWireServer:
                 except Exception as e:
                     logger.warning(f"Failed to decrypt token from {client_id}: {e}")
                     return
-                if not validate_token(token,self.config.token):
+                if not validate_token(token,self.config.token,auth_salt):
                     logger.warning(f"Invalid token from {client_id}")
                     return
                 if role=="main":

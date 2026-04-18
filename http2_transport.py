@@ -9,6 +9,7 @@ from h2.connection import H2Connection
 from h2.events import RequestReceived,DataReceived,StreamEnded,WindowUpdated,StreamReset,ConnectionTerminated,RemoteSettingsChanged
 from h2.config import H2Configuration
 from protocol import *
+from auth import validate_token
 
 logger=logging.getLogger(__name__)
 
@@ -58,6 +59,7 @@ class HTTP2ServerHandler:
         auth_buffer=b""
         msg_buffer=b""
         authenticated=False
+        auth_salt=None
         try:
             while not stop_event.is_set():
                 data=await reader.read(65536)
@@ -71,7 +73,8 @@ class HTTP2ServerHandler:
                         async with conn_lock:
                             conn.send_headers(stream_id,[(':status','200'),('content-type','application/octet-stream')],end_stream=False)
                         await self._flush_outbound(conn,writer,conn_lock)
-                        pubkey_msg=pack_pubkey(self.public_key)
+                        auth_salt=os.urandom(AUTH_SALT_SIZE)
+                        pubkey_msg=pack_pubkey(self.public_key,auth_salt)
                         frame_data=struct.pack("!I",len(pubkey_msg))+pubkey_msg
                         await self._send_framed_bytes(stream_id,frame_data,conn,writer,conn_lock,window_event,stop_event)
                     elif isinstance(event,DataReceived):
@@ -88,8 +91,8 @@ class HTTP2ServerHandler:
                                 msg_type,_,payload,_=await unpack_message(msg_data,None)
                                 if msg_type==MSG_AUTH:
                                     client_token=rsa_decrypt(self.private_key,payload)
-                                    token_str,_,_=unpack_auth_payload(client_token)
-                                    if token_str!=self.token:
+                                    token_bytes,_,_=unpack_auth_payload(client_token)
+                                    if not validate_token(token_bytes,self.token,auth_salt):
                                         raise ValueError("Invalid token")
                                 elif msg_type==MSG_PUBKEY:
                                     client_public_key=deserialize_public_key(payload)
@@ -189,7 +192,8 @@ class HTTP2ServerHandler:
                 preface+=chunk
             writer.write(b"HTTP/1.1 200 OK\r\nContent-Type: application/octet-stream\r\nTransfer-Encoding: chunked\r\n\r\n")
             await writer.drain()
-            pubkey_msg=pack_pubkey(self.public_key)
+            auth_salt=os.urandom(AUTH_SALT_SIZE)
+            pubkey_msg=pack_pubkey(self.public_key,auth_salt)
             writer.write(struct.pack("!I",len(pubkey_msg))+pubkey_msg)
             await writer.drain()
             auth_len_data=await asyncio.wait_for(reader.readexactly(4),timeout=30)
@@ -199,8 +203,8 @@ class HTTP2ServerHandler:
             if auth_type!=MSG_AUTH:
                 raise ValueError("Expected auth message")
             client_token=rsa_decrypt(self.private_key,encrypted_token)
-            token_str,_,_=unpack_auth_payload(client_token)
-            if token_str!=self.token:
+            token_bytes,_,_=unpack_auth_payload(client_token)
+            if not validate_token(token_bytes,self.token,auth_salt):
                 raise ValueError("Invalid token")
             pubkey_len_data=await asyncio.wait_for(reader.readexactly(4),timeout=30)
             pubkey_len=struct.unpack("!I",pubkey_len_data)[0]
@@ -404,13 +408,13 @@ class HTTP2ClientTransport:
             msg_type,_,server_pubkey,_=await unpack_message(server_msg_data,None)
             if msg_type!=MSG_PUBKEY:
                 raise ValueError("Expected public key from server")
-            server_public_key=deserialize_public_key(server_pubkey)
+            server_public_key,auth_salt=unpack_pubkey_payload(server_pubkey)
             logger.debug("Performing authentication...")
             client_private_key,client_public_key=generate_rsa_keypair()
-            auth_msg=pack_auth_message(self.token,server_public_key,role="main")
+            auth_msg=pack_auth_message(self.token,server_public_key,role="main",auth_salt=auth_salt)
             frame_data=struct.pack("!I",len(auth_msg))+auth_msg
             await self._send_framed_bytes(frame_data)
-            pubkey_msg=pack_pubkey(client_public_key)
+            pubkey_msg=pack_pubkey(client_public_key,os.urandom(AUTH_SALT_SIZE))
             frame_data=struct.pack("!I",len(pubkey_msg))+pubkey_msg
             await self._send_framed_bytes(frame_data)
             logger.debug("Waiting for session key...")

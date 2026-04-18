@@ -94,10 +94,10 @@ class UDPClientTransport:
                 msg_type,_,pubkey_bytes,_=await unpack_message(data,None)
                 if msg_type!=MSG_PUBKEY:
                     continue
-                server_public_key=deserialize_public_key(pubkey_bytes)
+                server_public_key,auth_salt=unpack_pubkey_payload(pubkey_bytes)
                 client_private_key,client_public_key=generate_rsa_keypair()
-                self._transport.sendto(pack_auth_message(self.token,server_public_key,role="main"))
-                self._transport.sendto(pack_pubkey(client_public_key))
+                self._transport.sendto(pack_auth_message(self.token,server_public_key,role="main",auth_salt=auth_salt))
+                self._transport.sendto(pack_pubkey(client_public_key,os.urandom(AUTH_SALT_SIZE)))
                 session_data=await asyncio.wait_for(self._recv_queue.get(),timeout=5)
                 if len(session_data)<9:
                     continue
@@ -215,7 +215,8 @@ class _UDPServerProtocol(asyncio.DatagramProtocol):
     async def _handshake(self,addr):
         ghost=self._ghost
         try:
-            self.send_to(pack_pubkey(ghost.public_key),addr)
+            auth_salt=os.urandom(AUTH_SALT_SIZE)
+            self.send_to(pack_pubkey(ghost.public_key,auth_salt),addr)
             auth_data=await asyncio.wait_for(self._pending_queue.get(),timeout=30)
             if len(auth_data)<9:
                 return
@@ -223,12 +224,12 @@ class _UDPServerProtocol(asyncio.DatagramProtocol):
             if msg_type!=MSG_AUTH:
                 return
             try:
-                token,role,_=unpack_auth_payload(rsa_decrypt(ghost.private_key,encrypted_token))
+                token_bytes,role,_=unpack_auth_payload(rsa_decrypt(ghost.private_key,encrypted_token))
             except Exception as e:
                 logger.warning(f"UDP: Failed to decrypt token from {addr}: {e}")
                 return
             from auth import validate_token
-            if not validate_token(token,ghost.config.token):
+            if not validate_token(token_bytes,ghost.config.token,auth_salt):
                 logger.warning(f"UDP: Invalid token from {addr}")
                 return
             if role!="main":

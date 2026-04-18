@@ -61,6 +61,7 @@ Users in Iran connect to the server's local ports (e.g., `localhost:8080`) and t
 - **[Port Mapping](docs/port-mapping.md)** - Port mapping syntax and examples
 - **[Troubleshooting](docs/troubleshooting.md)** - Common issues and solutions
 - **[CloudFlare Setup](docs/cloudflare-setup.md)** - CloudFlare configuration guide
+- **[Security](docs/security.md)** - Encryption, authentication, and MITM protection details
 
 ## Architecture
 

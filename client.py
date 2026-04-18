@@ -775,11 +775,11 @@ class GhostWireClient:
                 msg_type,_,pubkey_bytes,_=await unpack_message(pubkey_msg,None)
                 if msg_type!=MSG_PUBKEY:
                     raise ValueError("Expected public key from server")
-                server_public_key=deserialize_public_key(pubkey_bytes)
+                server_public_key,auth_salt=unpack_pubkey_payload(pubkey_bytes)
                 client_private_key,client_public_key=generate_rsa_keypair()
-                auth_msg=pack_auth_message(self.config.token,server_public_key,role="main")
+                auth_msg=pack_auth_message(self.config.token,server_public_key,role="main",auth_salt=auth_salt)
                 await self.main_websocket.send(auth_msg)
-                await self.main_websocket.send(pack_pubkey(client_public_key))
+                await self.main_websocket.send(pack_pubkey(client_public_key,os.urandom(AUTH_SALT_SIZE)))
                 session_msg=await asyncio.wait_for(self.main_websocket.recv(),timeout=10)
                 session_type,_,session_payload,_=await unpack_message(session_msg,None)
                 if session_type!=MSG_SESSION_KEY:
@@ -808,11 +808,11 @@ class GhostWireClient:
                 msg_type,_,pubkey_bytes,_=await unpack_message(pubkey_msg,None)
                 if msg_type!=MSG_PUBKEY:
                     raise ValueError("Expected public key from server")
-                server_public_key=deserialize_public_key(pubkey_bytes)
+                server_public_key,auth_salt=unpack_pubkey_payload(pubkey_bytes)
                 client_private_key,client_public_key=generate_rsa_keypair()
-                auth_msg=pack_auth_message(self.config.token,server_public_key,role="main")
+                auth_msg=pack_auth_message(self.config.token,server_public_key,role="main",auth_salt=auth_salt)
                 await self.main_websocket.send(auth_msg)
-                await self.main_websocket.send(pack_pubkey(client_public_key))
+                await self.main_websocket.send(pack_pubkey(client_public_key,os.urandom(AUTH_SALT_SIZE)))
                 session_msg=await asyncio.wait_for(self.main_websocket.recv(),timeout=10)
                 session_type,_,session_payload,_=await unpack_message(session_msg,None)
                 if session_type!=MSG_SESSION_KEY:
@@ -873,8 +873,8 @@ class GhostWireClient:
             msg_type,_,pubkey_bytes,_=await unpack_message(pubkey_msg,None)
             if msg_type!=MSG_PUBKEY:
                 raise ValueError("Expected public key from server")
-            server_public_key=deserialize_public_key(pubkey_bytes)
-            auth_msg=pack_auth_message(self.config.token,server_public_key,role="child",child_id=child_id)
+            server_public_key,auth_salt=unpack_pubkey_payload(pubkey_bytes)
+            auth_msg=pack_auth_message(self.config.token,server_public_key,role="child",child_id=child_id,auth_salt=auth_salt)
             await ws.send(auth_msg)
             send_queue=asyncio.Queue(maxsize=512)
             control_queue=asyncio.Queue(maxsize=256)

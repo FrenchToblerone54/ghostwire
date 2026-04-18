@@ -1,10 +1,10 @@
 import secrets
+import hashlib
 from nanoid import generate
 
 def generate_token():
     return generate(size=20)
 
-def validate_token(token,expected_token):
-    if len(token)!=len(expected_token):
-        return False
-    return secrets.compare_digest(token,expected_token)
+def validate_token(token_bytes,expected_token,auth_salt):
+    expected=hashlib.pbkdf2_hmac("sha256",expected_token.encode(),auth_salt,100000,32)
+    return secrets.compare_digest(token_bytes,expected)

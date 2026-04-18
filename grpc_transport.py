@@ -9,6 +9,7 @@ from urllib.parse import urlparse
 from grpclib.server import Server,Stream
 from grpclib.client import Channel
 from protocol import *
+from auth import validate_token
 from tunnel_grpc import TunnelBase,TunnelStub
 from tunnel_pb2 import TunnelMessage
 
@@ -37,7 +38,8 @@ class GrpcTunnelServicer(TunnelBase):
             if not init_msg or init_msg.data!=b"INIT":
                 logger.warning(f"Expected INIT message from {peer}")
                 return
-            pubkey_msg=pack_pubkey(self.public_key)
+            auth_salt=os.urandom(AUTH_SALT_SIZE)
+            pubkey_msg=pack_pubkey(self.public_key,auth_salt)
             await stream.send_message(TunnelMessage(data=pubkey_msg))
             auth_msg=await asyncio.wait_for(stream.recv_message(),timeout=30)
             if not auth_msg or not auth_msg.data:
@@ -52,11 +54,11 @@ class GrpcTunnelServicer(TunnelBase):
                 logger.warning(f"Expected AUTH message from {peer}")
                 return
             try:
-                token_str,role,child_id=unpack_auth_payload(rsa_decrypt(self.private_key,encrypted_token))
+                token_bytes,role,child_id=unpack_auth_payload(rsa_decrypt(self.private_key,encrypted_token))
             except Exception as e:
                 logger.warning(f"Failed to decrypt token from {peer}: {e}")
                 return
-            if token_str!=self.token:
+            if not validate_token(token_bytes,self.token,auth_salt):
                 logger.warning(f"Invalid token from {peer}")
                 return
             client_pubkey_msg=await asyncio.wait_for(stream.recv_message(),timeout=10)
@@ -250,12 +252,12 @@ class GrpcClientTransport:
             msg_type,_,pubkey_bytes,_=await unpack_message(pubkey_data,None)
             if msg_type!=MSG_PUBKEY:
                 raise ValueError("Expected public key from server")
-            server_public_key=deserialize_public_key(pubkey_bytes)
+            server_public_key,auth_salt=unpack_pubkey_payload(pubkey_bytes)
             logger.debug("Performing authentication...")
             client_private_key,client_public_key=generate_rsa_keypair()
-            auth_msg=pack_auth_message(self.token,server_public_key,role="main")
+            auth_msg=pack_auth_message(self.token,server_public_key,role="main",auth_salt=auth_salt)
             await self.stream.send_message(TunnelMessage(data=auth_msg))
-            pubkey_msg_data=pack_pubkey(client_public_key)
+            pubkey_msg_data=pack_pubkey(client_public_key,os.urandom(AUTH_SALT_SIZE))
             await self.stream.send_message(TunnelMessage(data=pubkey_msg_data))
             logger.debug("Waiting for session key...")
             session_msg=await asyncio.wait_for(self.stream.recv_message(),timeout=30)

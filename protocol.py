@@ -9,6 +9,7 @@ from cryptography.hazmat.primitives import hashes,serialization
 from cryptography.hazmat.primitives.asymmetric import rsa,padding
 
 _executor=ThreadPoolExecutor(max_workers=os.cpu_count())
+AUTH_SALT_SIZE=32
 
 MSG_PUBKEY=0x00
 MSG_AUTH=0x01
@@ -65,22 +66,32 @@ def pack_header(msg_type,conn_id,payload_length):
 def unpack_header(header):
     return struct.unpack("!BII",header)
 
-def pack_pubkey(public_key):
-    pubkey_bytes=serialize_public_key(public_key)
-    header=pack_header(MSG_PUBKEY,0,len(pubkey_bytes))
-    return header+pubkey_bytes
+def derive_auth_key(token,auth_salt):
+    return hashlib.pbkdf2_hmac("sha256",token.encode(),auth_salt,100000,32)
 
-def pack_auth_payload(token,role="main",child_id=""):
-    return role.encode()+b"\x00"+child_id.encode()+b"\x00"+token.encode()
+def pack_pubkey(public_key,auth_salt):
+    pubkey_bytes=serialize_public_key(public_key)
+    data=pubkey_bytes+auth_salt
+    header=pack_header(MSG_PUBKEY,0,len(data))
+    return header+data
+
+def unpack_pubkey_payload(payload):
+    pubkey_bytes=bytes(payload[:-AUTH_SALT_SIZE])
+    auth_salt=bytes(payload[-AUTH_SALT_SIZE:])
+    return deserialize_public_key(pubkey_bytes),auth_salt
+
+def pack_auth_payload(token,role="main",child_id="",auth_salt=None):
+    token_bytes=derive_auth_key(token,auth_salt) if auth_salt is not None else token.encode()
+    return role.encode()+b"\x00"+child_id.encode()+b"\x00"+token_bytes
 
 def unpack_auth_payload(payload):
     parts=payload.split(b"\x00",2)
     if len(parts)==3:
-        return parts[2].decode(),parts[0].decode(),parts[1].decode()
-    return payload.decode(),"main",""
+        return parts[2],parts[0].decode(),parts[1].decode()
+    return payload,"main",""
 
-def pack_auth_message(token,public_key=None,role="main",child_id=""):
-    payload=pack_auth_payload(token,role,child_id)
+def pack_auth_message(token,public_key=None,role="main",child_id="",auth_salt=None):
+    payload=pack_auth_payload(token,role,child_id,auth_salt)
     if public_key:
         encrypted_token=rsa_encrypt(public_key,payload)
         header=pack_header(MSG_AUTH,0,len(encrypted_token))
