@@ -90,13 +90,15 @@ class GhostWireClient:
             return False
         return url.startswith("wss://") or url.startswith("https://")
     def apply_resolve_ip(self,url):
-        if not self.config.resolve_ip:
-            return url,{}
         parsed=urlparse(url)
-        host_header=parsed.hostname
+        sni=self.config.sni or (parsed.hostname if self.config.resolve_ip else None)
+        host=self.config.host_header or (parsed.hostname if self.config.resolve_ip else None)
+        headers={"Host":host} if host else {}
+        if not self.config.resolve_ip:
+            return url,headers,sni
         port=f":{parsed.port}" if parsed.port else ""
         modified=url.replace(f"{parsed.scheme}://{parsed.hostname}{port}",f"{parsed.scheme}://{self.config.resolve_ip}{port}",1)
-        return modified,{"Host":host_header}
+        return modified,headers,sni
     def mode_accept_remote_connect(self):
         return self.config.mode=="reverse"
 
@@ -716,7 +718,7 @@ class GhostWireClient:
                     server_url=self.config.server_url.replace(self.config.cloudflare_host,best_ip)
                     logger.info(f"Using CloudFlare IP: {best_ip}")
             self.connected_server_url=server_url
-            server_url,extra_headers=self.apply_resolve_ip(server_url)
+            server_url,extra_headers,sni_host=self.apply_resolve_ip(server_url)
             if self.config.protocol=="http2":
                 from http2_transport import HTTP2ClientTransport
                 self.http2_transport=HTTP2ClientTransport(server_url,self.config.token)
@@ -763,7 +765,7 @@ class GhostWireClient:
             elif self.config.protocol=="aiohttp-ws":
                 session=aiohttp.ClientSession()
                 try:
-                    ws=await session.ws_connect(server_url,max_msg_size=0,compress=False,heartbeat=None,proxy=self.pick_ws_proxy(server_url),ssl=self.make_ssl_context(server_url),headers=extra_headers)
+                    ws=await session.ws_connect(server_url,max_msg_size=0,compress=False,heartbeat=None,proxy=self.pick_ws_proxy(server_url),ssl=self.make_ssl_context(server_url),headers=extra_headers,server_hostname=sni_host)
                 except Exception:
                     await session.close()
                     raise
@@ -796,7 +798,7 @@ class GhostWireClient:
             else:
                 session=aiohttp.ClientSession()
                 try:
-                    ws=await session.ws_connect(server_url,max_msg_size=0,compress=False,heartbeat=None,proxy=self.pick_ws_proxy(server_url),ssl=self.make_ssl_context(server_url),headers=extra_headers)
+                    ws=await session.ws_connect(server_url,max_msg_size=0,compress=False,heartbeat=None,proxy=self.pick_ws_proxy(server_url),ssl=self.make_ssl_context(server_url),headers=extra_headers,server_hostname=sni_host)
                 except Exception:
                     await session.close()
                     raise
@@ -859,10 +861,10 @@ class GhostWireClient:
     async def connect_child_channel(self,server_url,slot_id):
         child_id=generate(size=20)
         try:
-            server_url,extra_headers=self.apply_resolve_ip(server_url)
+            server_url,extra_headers,sni_host=self.apply_resolve_ip(server_url)
             session=aiohttp.ClientSession()
             try:
-                ws_raw=await session.ws_connect(server_url,max_msg_size=0,compress=False,heartbeat=None,proxy=self.pick_ws_proxy(server_url),ssl=self.make_ssl_context(server_url),headers=extra_headers)
+                ws_raw=await session.ws_connect(server_url,max_msg_size=0,compress=False,heartbeat=None,proxy=self.pick_ws_proxy(server_url),ssl=self.make_ssl_context(server_url),headers=extra_headers,server_hostname=sni_host)
             except Exception:
                 await session.close()
                 raise

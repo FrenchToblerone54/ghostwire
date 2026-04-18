@@ -138,4 +138,6 @@ class ClientConfig:
         self.port_mappings=parse_port_mappings(config.get("tunnels",{}).get("ports",[]))
         self.allow_insecure=config["server"].get("allow_insecure",False)
         self.resolve_ip=config["server"].get("resolve_ip","")
+        self.sni=config["server"].get("sni","")
+        self.host_header=config["server"].get("host_header","")
         self.service_name=config["server"].get("service_name","ghostwire-client")
