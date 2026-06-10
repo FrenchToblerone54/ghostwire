@@ -1235,12 +1235,9 @@ class GhostWireClient:
                     self.conn_write_tasks[conn_id]=asyncio.create_task(self.conn_writer_loop(conn_id,writer,queue))
                 queue.put_nowait(payload)
             except asyncio.QueueFull:
-                try:
-                    await asyncio.wait_for(queue.put(payload),timeout=30)
-                except asyncio.TimeoutError:
-                    logger.warning(f"Write queue stalled for remote connection {conn_id}, closing")
-                    self.clear_conn_data_state(conn_id)
-                    await self.close_conn_writer(conn_id,flush=False)
+                logger.warning(f"Write queue full for remote connection {conn_id}, dropping connection")
+                self.clear_conn_data_state(conn_id)
+                await self.close_conn_writer(conn_id,flush=False)
             except Exception as e:
                 logger.error(f"Error writing to remote connection {conn_id}: {e}")
                 self.clear_conn_data_state(conn_id)
