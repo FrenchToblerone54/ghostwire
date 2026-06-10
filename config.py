@@ -83,6 +83,7 @@ class ServerConfig:
         self.ws_pool_scale_up=config["server"].get("ws_pool_scale_up",100)
         self.ws_pool_scale_down=config["server"].get("ws_pool_scale_down",16)
         self.ws_pool_stripe=config["server"].get("ws_pool_stripe",False)
+        self.ws_pool_target_per_child=config["server"].get("ws_pool_target_per_child",8)
         self.ws_send_batch_bytes=config["server"].get("ws_send_batch_bytes",65536)
         self.http_request_min_upload_ms=config["server"].get("http_request_min_upload_ms",10)
         self.http_request_min_download_ms=config["server"].get("http_request_min_download_ms",25)

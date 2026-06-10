@@ -660,11 +660,16 @@ class GhostWireServer:
                 continue
             qsize=self.send_queue.qsize()
             active=len(self.tunnel_manager.connections)
+            per_child=max(1,self.config.ws_pool_target_per_child)
+            desired=max(self.config.ws_pool_min,min(self.config.ws_pool_children,-(-active//per_child)))
+            if qsize>=self.config.ws_pool_scale_up:
+                desired=min(self.config.ws_pool_children,desired+2)
             target=self.current_child_count
-            if qsize>=self.config.ws_pool_scale_up or active>self.current_child_count*10:
-                target=min(self.config.ws_pool_children,self.current_child_count+1)
+            if desired>self.current_child_count:
+                step=max(2,self.current_child_count//2)
+                target=min(desired,self.current_child_count+step)
                 scale_down_count=0
-            elif qsize<=self.config.ws_pool_scale_down and active<self.current_child_count*5:
+            elif desired<self.current_child_count:
                 scale_down_count+=1
                 if scale_down_count>=3:
                     target=max(self.config.ws_pool_min,self.current_child_count-1)
@@ -675,7 +680,7 @@ class GhostWireServer:
                 self.current_child_count=target
                 try:
                     self.control_queue.put_nowait(await pack_child_cfg(self.current_child_count,self.key))
-                    logger.info(f"Pool scaled to {self.current_child_count} connections (queue={qsize}, active={active})")
+                    logger.info(f"Pool scaled to {self.current_child_count} connections (queue={qsize}, active={active}, desired={desired})")
                 except asyncio.QueueFull:
                     pass
 
