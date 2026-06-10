@@ -476,6 +476,9 @@ class GhostWireClient:
     def should_stripe_data(self):
         return self.config.ws_pool_stripe and self.config.protocol in ("websocket","aiohttp-ws") and self.desired_child_count>1 and len(self.get_available_child_ids())>1
 
+    def reliable_pool(self):
+        return self.config.ws_pool_enabled and self.config.ws_pool_reliable
+
     def next_data_seq(self,conn_id):
         seq=self.conn_data_tx_seq.get(conn_id,0)
         self.conn_data_tx_seq[conn_id]=seq+1
@@ -526,7 +529,7 @@ class GhostWireClient:
                 if conn_id not in self.conn_data_rx_wait_start:
                     self.conn_data_rx_wait_start[conn_id]=time.time()
             self.conn_data_rx_expected[conn_id]=expected
-            if self.config.ws_pool_stripe and expected%ACK_INTERVAL==0 and self.main_control_queue:
+            if (self.config.ws_pool_stripe or self.reliable_pool()) and expected%ACK_INTERVAL==0 and self.main_control_queue:
                 try:
                     self.main_control_queue.put_nowait(await pack_seq_ack(conn_id,expected-1,self.key))
                 except asyncio.QueueFull:
@@ -1082,12 +1085,12 @@ class GhostWireClient:
                 if not send_queue:
                     logger.debug(f"Send queue unavailable, stopping forward for {conn_id}")
                     break
-                use_seq=conn_id in self.conn_data_seq_enabled or self.should_stripe_data()
+                use_seq=conn_id in self.conn_data_seq_enabled or self.should_stripe_data() or self.reliable_pool()
                 if use_seq:
                     self.conn_data_seq_enabled.add(conn_id)
                     seq=self.next_data_seq(conn_id)
                     message=await pack_data_seq(conn_id,seq,data,self.key)
-                    if self.config.ws_pool_stripe:
+                    if self.config.ws_pool_stripe or self.reliable_pool():
                         inflight=self.conn_data_inflight.setdefault(conn_id,{})
                         if len(inflight)<128:
                             inflight[seq]=(channel_id,message)
@@ -1232,9 +1235,12 @@ class GhostWireClient:
                     self.conn_write_tasks[conn_id]=asyncio.create_task(self.conn_writer_loop(conn_id,writer,queue))
                 queue.put_nowait(payload)
             except asyncio.QueueFull:
-                logger.warning(f"Write queue full for remote connection {conn_id}")
-                self.clear_conn_data_state(conn_id)
-                await self.close_conn_writer(conn_id,flush=False)
+                try:
+                    await asyncio.wait_for(queue.put(payload),timeout=30)
+                except asyncio.TimeoutError:
+                    logger.warning(f"Write queue stalled for remote connection {conn_id}, closing")
+                    self.clear_conn_data_state(conn_id)
+                    await self.close_conn_writer(conn_id,flush=False)
             except Exception as e:
                 logger.error(f"Error writing to remote connection {conn_id}: {e}")
                 self.clear_conn_data_state(conn_id)
