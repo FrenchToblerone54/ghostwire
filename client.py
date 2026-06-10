@@ -1002,6 +1002,7 @@ class GhostWireClient:
 
     async def connect_child_channel(self,server_url,slot_id):
         child_id=generate(size=20)
+        ws=None
         try:
             server_url,extra_headers,sni_host=self.apply_resolve_ip(server_url)
             session=aiohttp.ClientSession()
@@ -1036,6 +1037,11 @@ class GhostWireClient:
             return child_id
         except Exception as e:
             logger.warning(f"Child channel failed slot={slot_id} id={child_id}: {e}")
+            if ws is not None:
+                try:
+                    await ws.close()
+                except Exception:
+                    pass
             return None
 
     async def handle_connect(self,conn_id,remote_ip,remote_port):
