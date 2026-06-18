@@ -375,18 +375,15 @@ class GhostWireServer:
                     timed_out.append(conn_id)
             for conn_id in timed_out:
                 expected=self.conn_data_rx_expected.get(conn_id,0)
-                logger.warning(f"Connection {conn_id} sequence {expected} missing, skipping (VPN/TCP will retransmit)")
-                self.conn_data_rx_expected[conn_id]=expected+1
-                pending=self.conn_data_rx_pending.get(conn_id,{})
-                while pending and self.conn_data_rx_expected[conn_id] in pending:
-                    next_seq=self.conn_data_rx_expected[conn_id]
-                    next_payload=pending.pop(next_seq)
-                    await self.handle_data(conn_id,next_payload)
-                    self.conn_data_rx_expected[conn_id]+=1
-                if pending and self.conn_data_rx_expected[conn_id] not in pending:
-                    self.conn_data_rx_wait_start[conn_id]=time.time()
-                else:
-                    self.conn_data_rx_wait_start.pop(conn_id,None)
+                logger.warning(f"Connection {conn_id} sequence {expected} unrecoverable after {self.seq_timeout}s, resetting connection (skipping would corrupt the tunneled stream)")
+                try:
+                    if self.main_control_queue:
+                        self.main_control_queue.put_nowait(await pack_close(conn_id,0,self.key))
+                except asyncio.QueueFull:
+                    pass
+                await self.handle_close(conn_id)
+                self.conn_channel_map.pop(conn_id,None)
+                self.clear_conn_data_state(conn_id)
 
     async def close_child_channels(self):
         async def _close_one(child_id,channel):
