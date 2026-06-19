@@ -81,6 +81,8 @@ class GhostWireClient:
         self.conn_data_rx_wait_start={}
         self.conn_data_close_seq={}
         self.conn_data_inflight={}
+        self.conn_data_ack_event={}
+        self.seq_window=128
         self.seq_timeout=30
         self.io_chunk_size=262144
         self.writer_batch_bytes=262144
@@ -469,6 +471,9 @@ class GhostWireClient:
         self.conn_data_rx_wait_start.pop(conn_id,None)
         self.conn_data_close_seq.pop(conn_id,None)
         self.conn_data_inflight.pop(conn_id,None)
+        ev=self.conn_data_ack_event.pop(conn_id,None)
+        if ev:
+            ev.set()
 
     def get_available_child_ids(self):
         return [child_id for child_id,channel in self.child_channels.items() if channel.get("ws") and getattr(channel.get("ws"),"close_code",None) is None]
@@ -571,6 +576,9 @@ class GhostWireClient:
             del inflight[seq]
         if not inflight:
             self.conn_data_inflight.pop(conn_id,None)
+        ev=self.conn_data_ack_event.get(conn_id)
+        if ev:
+            ev.set()
 
     async def retransmit_inflight_for_child(self,dead_child_id):
         available=[cid for cid in self.get_available_child_ids() if cid!=dead_child_id]
@@ -1077,21 +1085,33 @@ class GhostWireClient:
                 data=await reader.read(self.io_chunk_size)
                 if not data:
                     break
+                use_seq=conn_id in self.conn_data_seq_enabled or self.should_stripe_data() or self.reliable_pool()
+                track_inflight=use_seq and (self.config.ws_pool_stripe or self.reliable_pool())
+                if track_inflight:
+                    while True:
+                        inflight=self.conn_data_inflight.setdefault(conn_id,{})
+                        if len(inflight)<self.seq_window:
+                            break
+                        ev=self.conn_data_ack_event.setdefault(conn_id,asyncio.Event())
+                        ev.clear()
+                        if len(inflight)<self.seq_window:
+                            break
+                        try:
+                            await asyncio.wait_for(ev.wait(),timeout=self.seq_timeout)
+                        except asyncio.TimeoutError:
+                            break
                 channel_id=self.pick_data_channel(conn_id)
                 channel=self.get_channel(channel_id)
                 send_queue=channel.get("send_queue") if channel else None
                 if not send_queue:
                     logger.debug(f"Send queue unavailable, stopping forward for {conn_id}")
                     break
-                use_seq=conn_id in self.conn_data_seq_enabled or self.should_stripe_data() or self.reliable_pool()
                 if use_seq:
                     self.conn_data_seq_enabled.add(conn_id)
                     seq=self.next_data_seq(conn_id)
                     message=await pack_data_seq(conn_id,seq,data,self.key)
-                    if self.config.ws_pool_stripe or self.reliable_pool():
-                        inflight=self.conn_data_inflight.setdefault(conn_id,{})
-                        if len(inflight)<128:
-                            inflight[seq]=(channel_id,message)
+                    if track_inflight:
+                        self.conn_data_inflight.setdefault(conn_id,{})[seq]=(channel_id,message)
                 else:
                     message=await pack_data(conn_id,data,self.key)
                 try:
